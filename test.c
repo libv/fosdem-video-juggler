@@ -29,10 +29,47 @@ const char *kms_driver_name = "sun4i-drm";
 int kms_fd;
 
 static void
+kms_object_properties_print(int fd, int id, uint32_t type)
+{
+	drmModeObjectProperties *props;
+	int i;
+
+	props = drmModeObjectGetProperties(fd, id, type);
+	if (!props) {
+		/* yes, no properties returns EINVAL */
+		if (errno != EINVAL)
+			fprintf(stderr,
+				"Failed to get object %d properties: %s\n",
+				id, strerror(errno));
+		return;
+	}
+
+	printf("\t\t   Properties:\n");
+	for (i = 0; i < (int) props->count_props; i++) {
+		drmModePropertyRes *property;
+
+		property = drmModeGetProperty(fd, props->props[i]);
+		if (!property) {
+			fprintf(stderr,
+				"Failed to get object %d property %d: %s\n",
+				id, props->props[i], strerror(errno));
+			continue;
+		}
+
+		printf("\t\t\t%02d: %s\n", property->prop_id, property->name);
+
+		drmModeFreeProperty(property);
+	}
+
+	drmModeFreeObjectProperties(props);
+}
+
+static void
 kms_fb_print(int fd, int id)
 {
-	drmModeFB *fb = drmModeGetFB(fd, id);
+	drmModeFB *fb;
 
+	fb = drmModeGetFB(fd, id);
 	if (!fb) {
 		fprintf(stderr, "Failed to get FB %d: %s\n", id,
 			strerror(errno));
@@ -43,14 +80,17 @@ kms_fb_print(int fd, int id)
 	       fb->width, fb->height, fb->pitch, fb->depth, fb->bpp);
 
 	drmModeFreeFB(fb);
+
+	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_FB);
 }
 
 static void
 kms_plane_print(int fd, uint32_t id)
 {
-	drmModePlane *plane = drmModeGetPlane(fd, id);
+	drmModePlane *plane;
 	int i;
 
+	plane = drmModeGetPlane(fd, id);
 	if (!plane) {
 		fprintf(stderr, "Failed to get Plane %d: %s\n", id,
 			strerror(errno));
@@ -73,13 +113,16 @@ kms_plane_print(int fd, uint32_t id)
 	printf("\n");
 
 	drmModeFreePlane(plane);
+
+	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_PLANE);
 }
 
 static void
 kms_crtc_print(int fd, int id)
 {
-	drmModeCrtc *crtc = drmModeGetCrtc(fd, id);
+	drmModeCrtc *crtc;
 
+	crtc = drmModeGetCrtc(fd, id);
 	if (!crtc) {
 		fprintf(stderr, "Failed to get CRTC %d: %s\n", id,
 			strerror(errno));
@@ -101,6 +144,8 @@ kms_crtc_print(int fd, int id)
 #endif
 
 	drmModeFreeCrtc(crtc);
+
+	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_CRTC);
 }
 
 static char *
@@ -132,8 +177,9 @@ kms_encoder_string(uint32_t encoder)
 static void
 kms_encoder_print(int fd, int id)
 {
-	drmModeEncoder *encoder = drmModeGetEncoder(fd, id);
+	drmModeEncoder *encoder;
 
+	encoder = drmModeGetEncoder(fd, id);
 	if (!encoder) {
 		fprintf(stderr, "Failed to get Encoder %d: %s\n", id,
 			strerror(errno));
@@ -146,6 +192,8 @@ kms_encoder_print(int fd, int id)
 	       encoder->possible_crtcs, encoder->possible_clones);
 
 	drmModeFreeEncoder(encoder);
+
+	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_ENCODER);
 }
 
 static char *
