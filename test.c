@@ -21,15 +21,17 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <sys/mman.h>
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
+#include <drm_fourcc.h>
 
 const char *kms_driver_name = "sun4i-drm";
 int kms_fd;
 
 static void
-kms_object_properties_print(int fd, int id, uint32_t type)
+kms_object_properties_print(int fd, uint32_t id, uint32_t type)
 {
 	drmModeObjectProperties *props;
 	int i;
@@ -39,7 +41,7 @@ kms_object_properties_print(int fd, int id, uint32_t type)
 		/* yes, no properties returns EINVAL */
 		if (errno != EINVAL)
 			fprintf(stderr,
-				"Failed to get object %d properties: %s\n",
+				"Failed to get object %u properties: %s\n",
 				id, strerror(errno));
 		return;
 	}
@@ -51,7 +53,7 @@ kms_object_properties_print(int fd, int id, uint32_t type)
 		property = drmModeGetProperty(fd, props->props[i]);
 		if (!property) {
 			fprintf(stderr,
-				"Failed to get object %d property %d: %s\n",
+				"Failed to get object %u property %u: %s\n",
 				id, props->props[i], strerror(errno));
 			continue;
 		}
@@ -65,13 +67,13 @@ kms_object_properties_print(int fd, int id, uint32_t type)
 }
 
 static void
-kms_fb_print(int fd, int id)
+kms_fb_print(int fd, uint32_t id)
 {
 	drmModeFB *fb;
 
 	fb = drmModeGetFB(fd, id);
 	if (!fb) {
-		fprintf(stderr, "Failed to get FB %d: %s\n", id,
+		fprintf(stderr, "Failed to get FB %u: %s\n", id,
 			strerror(errno));
 		return;
 	}
@@ -92,7 +94,7 @@ kms_plane_print(int fd, uint32_t id)
 
 	plane = drmModeGetPlane(fd, id);
 	if (!plane) {
-		fprintf(stderr, "Failed to get Plane %d: %s\n", id,
+		fprintf(stderr, "Failed to get Plane %u: %s\n", id,
 			strerror(errno));
 		return;
 	}
@@ -118,13 +120,13 @@ kms_plane_print(int fd, uint32_t id)
 }
 
 static void
-kms_crtc_print(int fd, int id)
+kms_crtc_print(int fd, uint32_t id)
 {
 	drmModeCrtc *crtc;
 
 	crtc = drmModeGetCrtc(fd, id);
 	if (!crtc) {
-		fprintf(stderr, "Failed to get CRTC %d: %s\n", id,
+		fprintf(stderr, "Failed to get CRTC %u: %s\n", id,
 			strerror(errno));
 		return;
 	}
@@ -175,13 +177,13 @@ kms_encoder_string(uint32_t encoder)
 }
 
 static void
-kms_encoder_print(int fd, int id)
+kms_encoder_print(int fd, uint32_t id)
 {
 	drmModeEncoder *encoder;
 
 	encoder = drmModeGetEncoder(fd, id);
 	if (!encoder) {
-		fprintf(stderr, "Failed to get Encoder %d: %s\n", id,
+		fprintf(stderr, "Failed to get Encoder %u: %s\n", id,
 			strerror(errno));
 		return;
 	}
@@ -253,14 +255,15 @@ kms_connection_string(drmModeConnection connection)
 }
 
 static void
-kms_connector_print(int fd, int id)
+kms_connector_print(int fd, uint32_t id)
 {
-	drmModeConnector *connector = drmModeGetConnector(fd, id);
+	drmModeConnector *connector;
 	int i;
 
+	connector = drmModeGetConnector(fd, id);
 	if (!connector) {
-		fprintf(stderr, "Failed to get Connector %d: %s\n", id,
-			strerror(errno));
+		fprintf(stderr, "%s: failed to get Connector %u: %s\n",
+			__func__, id, strerror(errno));
 		return;
 	}
 
@@ -282,18 +285,18 @@ int
 kms_resources_list(int fd)
 {
 	drmModeRes *resources;
-	drmModePlaneRes *planes;
+	drmModePlaneRes *resources_plane;
 	int i;
 
 	resources = drmModeGetResources(fd);
 	if (!resources) {
-		fprintf(stderr, "Failed to get KMS resources: %s\n",
-			strerror(errno));
+		fprintf(stderr, "%s: Failed to get KMS resources: %s\n",
+			__func__, strerror(errno));
 		return -EINVAL;
 	}
 
-	planes = drmModeGetPlaneResources(fd);
-	if (!planes) {
+	resources_plane = drmModeGetPlaneResources(fd);
+	if (!resources_plane) {
 		fprintf(stderr, "Failed to get KMS plane resources\n");
 		drmModeFreeResources(resources);
 		return -EINVAL;
@@ -309,8 +312,8 @@ kms_resources_list(int fd)
 		kms_fb_print(fd, resources->fbs[i]);
 
 	printf("\tPlanes:\n");
-	for (i = 0; i < (int) planes->count_planes; i++)
-		kms_plane_print(fd, planes->planes[i]);
+	for (i = 0; i < (int) resources_plane->count_planes; i++)
+		kms_plane_print(fd, resources_plane->planes[i]);
 
 	printf("\tCRTCs:\n");
 	for (i = 0; i < resources->count_crtcs; i++)
@@ -325,14 +328,237 @@ kms_resources_list(int fd)
 		kms_connector_print(fd, resources->connectors[i]);
 
 	drmModeFreeResources(resources);
-	drmModeFreePlaneResources(planes);
+	drmModeFreePlaneResources(resources_plane);
 
 	return 0;
+}
+
+static int
+kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
+{
+	drmModeRes *resources;
+	drmModeConnector *connector;
+	drmModeEncoder *encoder;
+	drmModeCrtc *crtc;
+	drmModePlaneRes *resources_plane;
+	drmModePlane *plane;
+	uint32_t crtc_id, plane_id, encoder_id, connector_id;
+	int i, j, ret, crtc_index;
+
+	resources = drmModeGetResources(fd);
+	if (!resources) {
+		fprintf(stderr, "%s: Failed to get KMS resources: %s\n",
+			__func__, strerror(errno));
+		return -EINVAL;
+	}
+
+	/* First, scan through our connectors. */
+        for (i = 0; i < resources->count_connectors; i++) {
+		connector_id = resources->connectors[i];
+
+		connector = drmModeGetConnector(fd, connector_id);
+		if (!connector) {
+			fprintf(stderr,
+				"%s: failed to get Connector %u: %s\n",
+				__func__, connector_id, strerror(errno));
+			ret = -errno;
+			goto error;
+		}
+
+		if ((connector->connector_type == DRM_MODE_CONNECTOR_HDMIA) &&
+		    (connector->connection == DRM_MODE_CONNECTED))
+			break;
+
+		drmModeFreeConnector(connector);
+	}
+
+	if (i == resources->count_connectors) {
+		fprintf(stderr, "%s: no active HDMI connector found.\n",
+			__func__);
+		ret = -ENODEV;
+		goto error;
+	}
+
+	printf("Using HDMI Connector %02u\n", connector->connector_id);
+
+	encoder_id = connector->encoder_id;
+
+	drmModeFreeConnector(connector);
+
+	/* Now look for our encoder */
+	encoder = drmModeGetEncoder(fd, encoder_id);
+	if (!encoder) {
+		fprintf(stderr, "%s: failed to get Encoder %u: %s\n",
+			__func__, encoder_id, strerror(errno));
+		ret = -errno;
+		goto error;
+	}
+
+	printf("Using Encoder %02u\n", encoder_id);
+
+	crtc_id = encoder->crtc_id;
+
+	drmModeFreeEncoder(encoder);
+
+	/* Now look for our CRTC */
+	crtc = drmModeGetCrtc(fd, crtc_id);
+	if (!crtc) {
+		fprintf(stderr, "%s: failed to get CRTC %u: %s\n",
+			__func__, crtc_id, strerror(errno));
+		ret = -errno;
+		goto error;
+	}
+
+	if (!crtc->mode_valid) {
+		fprintf(stderr, "%s: CRTC %u does not have a valid mode\n",
+			__func__, crtc_id);
+		ret = -EINVAL;
+		goto error;
+	}
+
+	printf("Using CRTC %02u\n", crtc_id);
+
+	drmModeFreeCrtc(crtc);
+
+	/* Now get the crtc index, so we can see which planes work */
+	for (i = 0; i < resources->count_crtcs; i++)
+		if (resources->crtcs[i] == crtc_id)
+			break;
+	crtc_index = i;
+
+	printf("CRTC has index %d\n", crtc_index);
+
+	/* Get plane resources so we can start sifting through the planes */
+	resources_plane = drmModeGetPlaneResources(fd);
+	if (!resources_plane) {
+		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
+			__func__);
+		ret = -EINVAL;
+		goto error;
+	}
+
+	/* now cycle through the planes to find one for our crtc */
+	for (i = 0; i < (int) resources_plane->count_planes; i++) {
+		plane_id = resources_plane->planes[i];
+
+		plane = drmModeGetPlane(fd, plane_id);
+		if (!plane) {
+			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
+				__func__, plane_id, strerror(errno));
+			ret = -errno;
+			goto error;
+		}
+
+		if (!(plane->possible_crtcs & (1 << crtc_index)))
+			goto plane_next;
+
+		if (plane->crtc_id != 0)
+			goto plane_next;
+
+		if (plane->fb_id != 0)
+			goto plane_next;
+
+		for (j = 0; j < (int) plane->count_formats; j++)
+			if (plane->formats[j] == DRM_FORMAT_ARGB8888)
+				break;
+
+		if (j == (int) plane->count_formats)
+			goto plane_next;
+
+		drmModeFreePlane(plane);
+		break;
+
+	plane_next:
+		drmModeFreePlane(plane);
+		continue;
+	}
+
+	if (i == (int) resources_plane->count_planes) {
+		fprintf(stderr, "%s: failed to get a Plane for our needs.\n",
+			__func__);
+		ret = -ENODEV;
+		goto error;
+	}
+
+	printf("Using Plane %02u\n", plane_id);
+
+	drmModeFreePlaneResources(resources_plane);
+	drmModeFreeResources(resources);
+
+	if (crtc_id_ret)
+		*crtc_id_ret = crtc_id;
+	if (plane_id_ret)
+		*plane_id_ret = plane_id;
+
+	return 0;
+ error:
+	drmModeFreePlaneResources(resources_plane);
+	drmModeFreeResources(resources);
+
+	return ret;
+}
+
+static void *
+kms_buffer_get(int fd, int width, int height, int bpp,
+	       uint32_t *handle_ret, size_t *size_ret)
+{
+	struct drm_mode_create_dumb buffer_create = { 0 };
+	struct drm_mode_map_dumb buffer_map = { 0 };
+	void *map;
+	uint32_t handle;
+	size_t size;
+	int ret;
+
+	buffer_create.width = width;
+	buffer_create.height = height;
+	buffer_create.bpp = bpp;
+	ret = drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &buffer_create);
+	if (ret) {
+		fprintf(stderr, "%s: failed to create buffer: %s\n",
+			__func__, strerror(errno));
+		return NULL;
+	}
+
+	handle = buffer_create.handle;
+	size = buffer_create.size;
+	printf("Created buffer %dx%d@%dbpp: %02u (%dbytes)\n",
+	       width, height, bpp, handle, size);
+
+	buffer_map.handle = handle;
+	ret = drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer_map);
+	if (ret) {
+		fprintf(stderr, "%s: failed to map buffer: %s\n",
+			__func__, strerror(errno));
+		return NULL;
+	}
+
+	printf("Mapped buffer %02u at offset 0x%llX\n", handle,
+		buffer_map.offset);
+
+	map = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
+		   buffer_map.offset);
+	if (map == MAP_FAILED) {
+		fprintf(stderr, "%s: failed to mmap buffer: %s\n",
+			__func__, strerror(errno));
+		return NULL;
+	}
+
+	printf("MMapped buffer %02u to %p\n", handle, map);
+
+	if (handle_ret)
+		*handle_ret = handle;
+	if (size_ret)
+		*size_ret = size;
+
+	return map;
 }
 
 int
 main(int argc, char *argv[])
 {
+	uint32_t crtc_id, plane_id, buffer_handle;
+	void *buffer_map;
+	size_t buffer_size;
 	int ret;
 
 	kms_fd = drmOpen(kms_driver_name, NULL);
@@ -360,6 +586,17 @@ main(int argc, char *argv[])
 	ret = kms_resources_list(kms_fd);
 	if (ret)
 		return ret;
+
+	ret = kms_plane_get(kms_fd, &crtc_id, &plane_id);
+	if (ret)
+		return ret;
+
+	printf("Using Plane %02d attached to Crtc %02d\n", plane_id, crtc_id);
+
+	buffer_map = kms_buffer_get(kms_fd, 1280, 720, 32,
+				    &buffer_handle, &buffer_size);
+	if (!buffer_map)
+		return -1;
 
 	return 0;
 }
