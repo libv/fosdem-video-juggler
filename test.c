@@ -27,8 +27,6 @@
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
 
-const char *kms_driver_name = "sun4i-drm";
-
 struct buffer {
 	uint32_t handle; /* dumb buffer handle */
 
@@ -60,6 +58,36 @@ struct test {
 	int buffer_count;
 	struct buffer buffers[2][1];
 };
+
+static int
+kms_init(struct test *test, const char *driver_name)
+{
+	int ret;
+
+	test->kms_fd = drmOpen(driver_name, NULL);
+	if (test->kms_fd == -1) {
+		fprintf(stderr, "Error: Failed to open KMS driver %s: %s\n",
+			driver_name, strerror(errno));
+		return errno;
+	}
+
+	ret = drmSetClientCap(test->kms_fd, DRM_CLIENT_CAP_ATOMIC, 1);
+	if (ret < 0) {
+		fprintf(stderr, "Error: Unable to set DRM_CLIENT_CAP_ATOMIC:"
+			" %s\n", strerror(errno));
+		return ret;
+	}
+
+	ret = drmSetClientCap(test->kms_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+	if (ret < 0) {
+		fprintf(stderr, "Error: Unable to set "
+			"DRM_CLIENT_CAP_UNIVERSAL_PLANES: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+return 0;
+}
 
 static void
 kms_object_properties_print(int fd, uint32_t id, uint32_t type)
@@ -648,27 +676,9 @@ main(int argc, char *argv[])
 	struct test test[1] = {{ 0 }};
 	int ret;
 
-	test->kms_fd = drmOpen(kms_driver_name, NULL);
-	if (test->kms_fd == -1) {
-		fprintf(stderr, "Error: Failed to open KMS driver %s: %s\n",
-			kms_driver_name, strerror(errno));
-		return errno;
-	}
-
-	ret = drmSetClientCap(test->kms_fd, DRM_CLIENT_CAP_ATOMIC, 1);
-	if (ret < 0) {
-		fprintf(stderr, "Error: Unable to set DRM_CLIENT_CAP_ATOMIC:"
-			" %s\n", strerror(errno));
+	ret = kms_init(test, "sun4i-drm");
+	if (ret)
 		return ret;
-	}
-
-	ret = drmSetClientCap(test->kms_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
-	if (ret < 0) {
-		fprintf(stderr, "Error: Unable to set "
-			"DRM_CLIENT_CAP_UNIVERSAL_PLANES: %s\n",
-			strerror(errno));
-		return ret;
-	}
 
 	ret = kms_resources_list(test->kms_fd);
 	if (ret)
