@@ -596,7 +596,7 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 	return 0;
 }
 
-static int buffer_fill(struct test *test, struct buffer *buffer, int frame)
+static void buffer_fill(struct test *test, struct buffer *buffer, int frame)
 {
 	uint32_t *data = buffer->map;
 	int offset = 0;
@@ -611,6 +611,33 @@ static int buffer_fill(struct test *test, struct buffer *buffer, int frame)
 			offset++;
 		}
 	}
+}
+
+static int
+kms_plane_display(struct test *test, struct buffer *buffer, int frame)
+{
+	int ret;
+
+	buffer_fill(test, buffer, frame);
+
+	/*
+	 * << 16? when did that bs happen?
+	 * Also, since when do we fail with just "einval"?
+	 */
+	ret = drmModeSetPlane(test->kms_fd, test->plane_id, test->crtc_id,
+			      buffer->fb_id, 0,
+			      0, 0, test->width, test->height,
+			      0, 0, test->width << 16, test->height << 16);
+	if (ret) {
+		fprintf(stderr,
+			"%s: failed to show plane %02u with fb %02u: %s\n",
+			__func__, test->plane_id, buffer->fb_id,
+			strerror(errno));
+		return -errno;
+	}
+
+	printf("Showing plane %02u with fb %02u for frame %d\n",
+	       test->plane_id, buffer->fb_id, frame);
 
 	return 0;
 }
@@ -669,7 +696,11 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
-	buffer_fill(test, test->buffers[1], 0xF0);
+	ret = kms_plane_display(test, test->buffers[0], 0x0F);
+	if (ret)
+		return ret;
+
+	sleep(30);
 
 	return 0;
 }
