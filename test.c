@@ -529,11 +529,13 @@ kms_plane_get(struct test *test)
 }
 
 static int
-kms_buffer_get(struct test *test, int index)
+kms_buffer_get(struct test *test, struct buffer *buffer)
 {
 	struct drm_mode_create_dumb buffer_create = { 0 };
 	struct drm_mode_map_dumb buffer_map = { 0 };
-	struct buffer *buffer = test->buffers[index];
+	uint32_t handles[4] = { 0 };
+	uint32_t pitches[4] = { 0 };
+	uint32_t offsets[4] = { 0 };
 	int ret;
 
 	buffer_create.width = test->width;
@@ -575,6 +577,21 @@ kms_buffer_get(struct test *test, int index)
 	}
 
 	printf("MMapped buffer %02u to %p\n", buffer->handle, buffer->map);
+
+	handles[0] = buffer->handle;
+	pitches[0] = buffer->pitch;
+
+	ret = drmModeAddFB2(test->kms_fd, test->width, test->height,
+			    test->format, handles, pitches, offsets,
+			    &buffer->fb_id, 0);
+	if (ret) {
+		fprintf(stderr, "%s: failed to create fb for buffer %02u: %s\n",
+			__func__, buffer->handle, strerror(errno));
+		return -errno;
+	}
+
+	printf("Created FB %02u from buffer %02u.\n",
+	       buffer->fb_id, buffer->handle);
 
 	return 0;
 }
@@ -623,11 +640,11 @@ main(int argc, char *argv[])
 	test->bpp = 32;
 	test->format = DRM_FORMAT_ARGB8888;
 
-	ret = kms_buffer_get(test, 0);
+	ret = kms_buffer_get(test, test->buffers[0]);
 	if (ret)
 		return ret;
 
-	ret = kms_buffer_get(test, 1);
+	ret = kms_buffer_get(test, test->buffers[1]);
 	if (ret)
 		return ret;
 
