@@ -596,6 +596,25 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 	return 0;
 }
 
+static int buffer_fill(struct test *test, struct buffer *buffer, int frame)
+{
+	uint32_t *data = buffer->map;
+	int offset = 0;
+	int x, y;
+
+	for (y = 0; y < test->height; y++) {
+		for (x = 0; x < test->width; x++) {
+			data[offset] =
+				((frame & 0xFF) << 0) |
+				((x & 0xFF) << 8) |
+				((y & 0xFF) << 16);
+			offset++;
+		}
+	}
+
+	return 0;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -644,9 +663,13 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
+	buffer_fill(test, test->buffers[0], 0x0F);
+
 	ret = kms_buffer_get(test, test->buffers[1]);
 	if (ret)
 		return ret;
+
+	buffer_fill(test, test->buffers[1], 0xF0);
 
 	return 0;
 }
