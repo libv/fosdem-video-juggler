@@ -28,7 +28,38 @@
 #include <drm_fourcc.h>
 
 const char *kms_driver_name = "sun4i-drm";
-int kms_fd;
+
+struct buffer {
+	uint32_t handle; /* dumb buffer handle */
+
+	int pitch;
+	size_t size;
+
+	uint64_t map_offset;
+	void *map;
+
+	uint32_t fb_id;
+};
+
+struct test {
+	int kms_fd;
+
+	uint32_t crtc_id;
+	int crtc_width;
+	int crtc_height;
+
+	uint32_t plane_id;
+
+	/* buffer info */
+	int width;
+	int height;
+	int bpp;
+	uint32_t format;
+
+	/* actual buffers */
+	int buffer_count;
+	struct buffer buffers[2][1];
+};
 
 static void
 kms_object_properties_print(int fd, uint32_t id, uint32_t type)
@@ -334,7 +365,7 @@ kms_resources_list(int fd)
 }
 
 static int
-kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
+kms_plane_get(struct test *test)
 {
 	drmModeRes *resources;
 	drmModeConnector *connector;
@@ -345,7 +376,7 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
 	uint32_t crtc_id, plane_id, encoder_id, connector_id;
 	int i, j, ret, crtc_index;
 
-	resources = drmModeGetResources(fd);
+	resources = drmModeGetResources(test->kms_fd);
 	if (!resources) {
 		fprintf(stderr, "%s: Failed to get KMS resources: %s\n",
 			__func__, strerror(errno));
@@ -356,7 +387,7 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
         for (i = 0; i < resources->count_connectors; i++) {
 		connector_id = resources->connectors[i];
 
-		connector = drmModeGetConnector(fd, connector_id);
+		connector = drmModeGetConnector(test->kms_fd, connector_id);
 		if (!connector) {
 			fprintf(stderr,
 				"%s: failed to get Connector %u: %s\n",
@@ -386,7 +417,7 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
 	drmModeFreeConnector(connector);
 
 	/* Now look for our encoder */
-	encoder = drmModeGetEncoder(fd, encoder_id);
+	encoder = drmModeGetEncoder(test->kms_fd, encoder_id);
 	if (!encoder) {
 		fprintf(stderr, "%s: failed to get Encoder %u: %s\n",
 			__func__, encoder_id, strerror(errno));
@@ -401,7 +432,7 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
 	drmModeFreeEncoder(encoder);
 
 	/* Now look for our CRTC */
-	crtc = drmModeGetCrtc(fd, crtc_id);
+	crtc = drmModeGetCrtc(test->kms_fd, crtc_id);
 	if (!crtc) {
 		fprintf(stderr, "%s: failed to get CRTC %u: %s\n",
 			__func__, crtc_id, strerror(errno));
@@ -416,6 +447,9 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
 		goto error;
 	}
 
+	test->crtc_id = crtc_id;
+	test->crtc_width = crtc->width;
+	test->crtc_height = crtc->height;
 	printf("Using CRTC %02u\n", crtc_id);
 
 	drmModeFreeCrtc(crtc);
@@ -429,7 +463,7 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
 	printf("CRTC has index %d\n", crtc_index);
 
 	/* Get plane resources so we can start sifting through the planes */
-	resources_plane = drmModeGetPlaneResources(fd);
+	resources_plane = drmModeGetPlaneResources(test->kms_fd);
 	if (!resources_plane) {
 		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
 			__func__);
@@ -441,7 +475,7 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
 	for (i = 0; i < (int) resources_plane->count_planes; i++) {
 		plane_id = resources_plane->planes[i];
 
-		plane = drmModeGetPlane(fd, plane_id);
+		plane = drmModeGetPlane(test->kms_fd, plane_id);
 		if (!plane) {
 			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
 				__func__, plane_id, strerror(errno));
@@ -480,15 +514,11 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
 		goto error;
 	}
 
+	test->plane_id = plane_id;
 	printf("Using Plane %02u\n", plane_id);
 
 	drmModeFreePlaneResources(resources_plane);
 	drmModeFreeResources(resources);
-
-	if (crtc_id_ret)
-		*crtc_id_ret = crtc_id;
-	if (plane_id_ret)
-		*plane_id_ret = plane_id;
 
 	return 0;
  error:
@@ -498,84 +528,78 @@ kms_plane_get(int fd, uint32_t *crtc_id_ret, uint32_t *plane_id_ret)
 	return ret;
 }
 
-static void *
-kms_buffer_get(int fd, int width, int height, int bpp,
-	       uint32_t *handle_ret, size_t *size_ret)
+static int
+kms_buffer_get(struct test *test, int index)
 {
 	struct drm_mode_create_dumb buffer_create = { 0 };
 	struct drm_mode_map_dumb buffer_map = { 0 };
-	void *map;
-	uint32_t handle;
-	size_t size;
+	struct buffer *buffer = test->buffers[index];
 	int ret;
 
-	buffer_create.width = width;
-	buffer_create.height = height;
-	buffer_create.bpp = bpp;
-	ret = drmIoctl(fd, DRM_IOCTL_MODE_CREATE_DUMB, &buffer_create);
+	buffer_create.width = test->width;
+	buffer_create.height = test->height;
+	buffer_create.bpp = test->bpp;
+	ret = drmIoctl(test->kms_fd, DRM_IOCTL_MODE_CREATE_DUMB,
+		       &buffer_create);
 	if (ret) {
 		fprintf(stderr, "%s: failed to create buffer: %s\n",
 			__func__, strerror(errno));
-		return NULL;
+		return ret;
 	}
 
-	handle = buffer_create.handle;
-	size = buffer_create.size;
+	buffer->handle = buffer_create.handle;
+	buffer->size = buffer_create.size;
+	buffer->pitch = buffer_create.pitch;
 	printf("Created buffer %dx%d@%dbpp: %02u (%dbytes)\n",
-	       width, height, bpp, handle, size);
+	       test->width, test->height, test->bpp,
+	       buffer->handle, buffer->size);
 
-	buffer_map.handle = handle;
-	ret = drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer_map);
+	buffer_map.handle = buffer->handle;
+	ret = drmIoctl(test->kms_fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer_map);
 	if (ret) {
 		fprintf(stderr, "%s: failed to map buffer: %s\n",
 			__func__, strerror(errno));
-		return NULL;
+		return -errno;
 	}
 
-	printf("Mapped buffer %02u at offset 0x%llX\n", handle,
-		buffer_map.offset);
+	buffer->map_offset = buffer_map.offset;
+	printf("Mapped buffer %02u at offset 0x%llX\n", buffer->handle,
+		buffer->map_offset);
 
-	map = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd,
-		   buffer_map.offset);
-	if (map == MAP_FAILED) {
+	buffer->map = mmap(0, buffer->size, PROT_READ | PROT_WRITE, MAP_SHARED,
+			   test->kms_fd, buffer->map_offset);
+	if (buffer->map == MAP_FAILED) {
 		fprintf(stderr, "%s: failed to mmap buffer: %s\n",
 			__func__, strerror(errno));
-		return NULL;
+		return -errno;
 	}
 
-	printf("MMapped buffer %02u to %p\n", handle, map);
+	printf("MMapped buffer %02u to %p\n", buffer->handle, buffer->map);
 
-	if (handle_ret)
-		*handle_ret = handle;
-	if (size_ret)
-		*size_ret = size;
-
-	return map;
+	return 0;
 }
 
 int
 main(int argc, char *argv[])
 {
-	uint32_t crtc_id, plane_id, buffer_handle;
-	void *buffer_map;
-	size_t buffer_size;
+	struct test test[1] = {{ 0 }};
 	int ret;
 
-	kms_fd = drmOpen(kms_driver_name, NULL);
-	if (kms_fd == -1) {
+	test->kms_fd = drmOpen(kms_driver_name, NULL);
+	if (test->kms_fd == -1) {
 		fprintf(stderr, "Error: Failed to open KMS driver %s: %s\n",
 			kms_driver_name, strerror(errno));
 		return errno;
 	}
 
-	ret = drmSetClientCap(kms_fd, DRM_CLIENT_CAP_ATOMIC, 1);
+	ret = drmSetClientCap(test->kms_fd, DRM_CLIENT_CAP_ATOMIC, 1);
 	if (ret < 0) {
 		fprintf(stderr, "Error: Unable to set DRM_CLIENT_CAP_ATOMIC:"
 			" %s\n", strerror(errno));
 		return ret;
 	}
 
-	ret = drmSetClientCap(kms_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+	ret = drmSetClientCap(test->kms_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
 	if (ret < 0) {
 		fprintf(stderr, "Error: Unable to set "
 			"DRM_CLIENT_CAP_UNIVERSAL_PLANES: %s\n",
@@ -583,20 +607,29 @@ main(int argc, char *argv[])
 		return ret;
 	}
 
-	ret = kms_resources_list(kms_fd);
+	ret = kms_resources_list(test->kms_fd);
 	if (ret)
 		return ret;
 
-	ret = kms_plane_get(kms_fd, &crtc_id, &plane_id);
+	ret = kms_plane_get(test);
 	if (ret)
 		return ret;
 
-	printf("Using Plane %02d attached to Crtc %02d\n", plane_id, crtc_id);
+	printf("Using Plane %02d attached to Crtc %02d\n",
+	       test->plane_id, test->crtc_id);
 
-	buffer_map = kms_buffer_get(kms_fd, 1280, 720, 32,
-				    &buffer_handle, &buffer_size);
-	if (!buffer_map)
-		return -1;
+	test->width = 1280;
+	test->height = 720;
+	test->bpp = 32;
+	test->format = DRM_FORMAT_ARGB8888;
+
+	ret = kms_buffer_get(test, 0);
+	if (ret)
+		return ret;
+
+	ret = kms_buffer_get(test, 1);
+	if (ret)
+		return ret;
 
 	return 0;
 }
