@@ -546,11 +546,16 @@ kms_plane_get(struct test *test)
 		if (!(plane->possible_crtcs & (1 << crtc_index)))
 			goto plane_next;
 
+#if 0
 		if (plane->crtc_id && (plane->crtc_id != crtc_id))
 			goto plane_next;
 
 		if (plane->fb_id && !plane->crtc_id)
 			goto plane_next;
+#else
+		if (plane->crtc_id || plane->fb_id)
+			goto plane_next;
+#endif
 
 		for (j = 0; j < (int) plane->count_formats; j++)
 			if (plane->formats[j] == DRM_FORMAT_ARGB8888)
@@ -723,8 +728,7 @@ static void buffer_fill(struct test *test, struct buffer *buffer, int frame)
 			data[offset] =
 				((frame & 0xFF) << 0) |
 				((x & 0xFF) << 8) |
-				((y & 0xFF) << 16) |
-				0xFF000000;
+				((y & 0xFF) << 16);
 			offset++;
 		}
 	}
@@ -783,7 +787,7 @@ main(int argc, char *argv[])
 	test->width = test->crtc_width;
 	test->height = test->crtc_height;
 	test->bpp = 32;
-	test->format = DRM_FORMAT_ARGB8888;
+	test->format = DRM_FORMAT_XRGB8888;
 
 	ret = kms_buffer_get(test, test->buffers[0]);
 	if (ret)
