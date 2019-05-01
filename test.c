@@ -57,6 +57,19 @@ struct test {
 	/* actual buffers */
 	int buffer_count;
 	struct buffer buffers[2][1];
+
+	/* property ids -- how clunky is this? */
+	uint32_t plane_property_crtc_id;
+	uint32_t plane_property_fb_id;
+	uint32_t plane_property_crtc_x;
+	uint32_t plane_property_crtc_y;
+	uint32_t plane_property_crtc_w;
+	uint32_t plane_property_crtc_h;
+	uint32_t plane_property_in_x;
+	uint32_t plane_property_in_y;
+	uint32_t plane_property_in_w;
+	uint32_t plane_property_in_h;
+	uint32_t plane_property_in_formats;
 };
 
 static int
@@ -86,17 +99,17 @@ kms_init(struct test *test, const char *driver_name)
 		return ret;
 	}
 
-return 0;
+	return 0;
 }
 
 static void
 kms_object_properties_print(int fd, uint32_t id, uint32_t type)
 {
-	drmModeObjectProperties *props;
-	int i;
+	drmModeObjectProperties *properties;
+	int i, j;
 
-	props = drmModeObjectGetProperties(fd, id, type);
-	if (!props) {
+	properties = drmModeObjectGetProperties(fd, id, type);
+	if (!properties) {
 		/* yes, no properties returns EINVAL */
 		if (errno != EINVAL)
 			fprintf(stderr,
@@ -106,23 +119,41 @@ kms_object_properties_print(int fd, uint32_t id, uint32_t type)
 	}
 
 	printf("\t\t   Properties:\n");
-	for (i = 0; i < (int) props->count_props; i++) {
+	for (i = 0; i < (int) properties->count_props; i++) {
 		drmModePropertyRes *property;
 
-		property = drmModeGetProperty(fd, props->props[i]);
+		property = drmModeGetProperty(fd, properties->props[i]);
 		if (!property) {
 			fprintf(stderr,
 				"Failed to get object %u property %u: %s\n",
-				id, props->props[i], strerror(errno));
+				id, properties->props[i], strerror(errno));
 			continue;
 		}
 
-		printf("\t\t\t%02d: %s\n", property->prop_id, property->name);
+		printf("\t\t\t%02d: %s flags 0x%X:",
+		       property->prop_id, property->name, property->flags);
+
+		if ((property->flags & DRM_MODE_PROP_RANGE) ||
+		    (property->flags & DRM_MODE_PROP_SIGNED_RANGE)) {
+			printf(" [");
+			for (j = 0; j < property->count_values; j++) {
+				if (j)
+					printf(":");
+				if (property->flags & DRM_MODE_PROP_RANGE)
+					printf("0x%llX", property->values[j]);
+				else if (((int64_t) property->values[j]) < 0)
+					printf("-0x%llX", - ((int64_t) property->values[j]));
+				else
+					printf("0x%llX", (int64_t) property->values[j]);
+			}
+			printf("]");
+		}
+		printf("\n");
 
 		drmModeFreeProperty(property);
 	}
 
-	drmModeFreeObjectProperties(props);
+	drmModeFreeObjectProperties(properties);
 }
 
 static void
@@ -158,9 +189,8 @@ kms_plane_print(int fd, uint32_t id)
 		return;
 	}
 
-	printf("\t\t%02d: FB %02d (%4dx%4d), CRTC %02d (%4dx%4d),"
-	       " Possible CRTCs 0x%02X\n", plane->plane_id, plane->fb_id,
-	       plane->crtc_x, plane->crtc_y, plane->crtc_id, plane->x, plane->y,
+	printf("\t\t%02d: FB %02d, CRTC %02d, Possible CRTCs 0x%02X\n",
+	       plane->plane_id, plane->fb_id, plane->crtc_id,
 	       plane->possible_crtcs);
 	printf("\t\t   Supported Formats:");
 	for (i = 0; i < (int) plane->count_formats; i++) {
@@ -176,6 +206,7 @@ kms_plane_print(int fd, uint32_t id)
 	drmModeFreePlane(plane);
 
 	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_PLANE);
+
 }
 
 static void
@@ -401,6 +432,7 @@ kms_plane_get(struct test *test)
 	drmModeCrtc *crtc;
 	drmModePlaneRes *resources_plane;
 	drmModePlane *plane;
+	drmModeObjectProperties *properties;
 	uint32_t crtc_id, plane_id, encoder_id, connector_id;
 	int i, j, ret, crtc_index;
 
@@ -514,10 +546,10 @@ kms_plane_get(struct test *test)
 		if (!(plane->possible_crtcs & (1 << crtc_index)))
 			goto plane_next;
 
-		if (plane->crtc_id != 0)
+		if (plane->crtc_id && (plane->crtc_id != crtc_id))
 			goto plane_next;
 
-		if (plane->fb_id != 0)
+		if (plane->fb_id && !plane->crtc_id)
 			goto plane_next;
 
 		for (j = 0; j < (int) plane->count_formats; j++)
@@ -547,6 +579,62 @@ kms_plane_get(struct test *test)
 
 	drmModeFreePlaneResources(resources_plane);
 	drmModeFreeResources(resources);
+
+	/* now that we have our plane, get the relevant property ids */
+	properties = drmModeObjectGetProperties(test->kms_fd, plane_id,
+						DRM_MODE_OBJECT_PLANE);
+	if (!properties) {
+		/* yes, no properties returns EINVAL */
+		if (errno != EINVAL) {
+			fprintf(stderr,
+				"Failed to get object %u properties: %s\n",
+				plane_id, strerror(errno));
+			ret = -errno;
+			goto error;
+		}
+	} else {
+		for (i = 0; i < (int) properties->count_props; i++) {
+			drmModePropertyRes *property;
+
+			property = drmModeGetProperty(test->kms_fd,
+						      properties->props[i]);
+			if (!property) {
+				fprintf(stderr, "Failed to get object %u "
+					"property %u: %s\n", plane_id,
+					properties->props[i], strerror(errno));
+				continue;
+			}
+
+			if (!strcmp(property->name, "CRTC_ID"))
+				test->plane_property_crtc_id =
+					property->prop_id;
+			else if (!strcmp(property->name, "FB_ID"))
+				test->plane_property_fb_id = property->prop_id;
+			else if (!strcmp(property->name, "CRTC_X"))
+				test->plane_property_crtc_x = property->prop_id;
+			else if (!strcmp(property->name, "CRTC_Y"))
+				test->plane_property_crtc_y = property->prop_id;
+			else if (!strcmp(property->name, "CRTC_W"))
+				test->plane_property_crtc_w = property->prop_id;
+			else if (!strcmp(property->name, "CRTC_H"))
+				test->plane_property_crtc_h = property->prop_id;
+			else if (!strcmp(property->name, "IN_X"))
+				test->plane_property_in_x = property->prop_id;
+			else if (!strcmp(property->name, "IN_Y"))
+				test->plane_property_in_y = property->prop_id;
+			else if (!strcmp(property->name, "IN_W"))
+				test->plane_property_in_w = property->prop_id;
+			else if (!strcmp(property->name, "IN_H"))
+				test->plane_property_in_h = property->prop_id;
+			else if (!strcmp(property->name, "IN_FORMATS"))
+				test->plane_property_in_formats =
+					property->prop_id;
+
+			drmModeFreeProperty(property);
+		}
+
+		drmModeFreeObjectProperties(properties);
+	}
 
 	return 0;
  error:
@@ -635,7 +723,8 @@ static void buffer_fill(struct test *test, struct buffer *buffer, int frame)
 			data[offset] =
 				((frame & 0xFF) << 0) |
 				((x & 0xFF) << 8) |
-				((y & 0xFF) << 16);
+				((y & 0xFF) << 16) |
+				0xFF000000;
 			offset++;
 		}
 	}
@@ -691,18 +780,12 @@ main(int argc, char *argv[])
 	printf("Using Plane %02d attached to Crtc %02d\n",
 	       test->plane_id, test->crtc_id);
 
-	test->width = 1280;
-	test->height = 720;
+	test->width = test->crtc_width;
+	test->height = test->crtc_height;
 	test->bpp = 32;
 	test->format = DRM_FORMAT_ARGB8888;
 
 	ret = kms_buffer_get(test, test->buffers[0]);
-	if (ret)
-		return ret;
-
-	buffer_fill(test, test->buffers[0], 0x0F);
-
-	ret = kms_buffer_get(test, test->buffers[1]);
 	if (ret)
 		return ret;
 
