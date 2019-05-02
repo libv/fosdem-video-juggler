@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2019 Luc Verhaegen <libv@skynet.be>
+ * Copyright (c) 2011-2013, 2019 Luc Verhaegen <libv@skynet.be>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,6 +22,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <time.h>
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
@@ -56,7 +57,7 @@ struct test {
 
 	/* actual buffers */
 	int buffer_count;
-	struct buffer buffers[2][1];
+	struct buffer buffers[3][1];
 
 	/* property ids -- how clunky is this? */
 	uint32_t plane_property_crtc_id;
@@ -427,13 +428,13 @@ static int
 kms_plane_get(struct test *test)
 {
 	drmModeRes *resources;
-	drmModeConnector *connector;
+	drmModeConnector *connector = NULL;
 	drmModeEncoder *encoder;
 	drmModeCrtc *crtc;
-	drmModePlaneRes *resources_plane;
+	drmModePlaneRes *resources_plane = NULL;
 	drmModePlane *plane;
 	drmModeObjectProperties *properties;
-	uint32_t crtc_id, plane_id, encoder_id, connector_id;
+	uint32_t crtc_id, plane_id = 0, encoder_id, connector_id;
 	int i, j, ret, crtc_index;
 
 	resources = drmModeGetResources(test->kms_fd);
@@ -546,13 +547,13 @@ kms_plane_get(struct test *test)
 		if (!(plane->possible_crtcs & (1 << crtc_index)))
 			goto plane_next;
 
-#if 0
+#if 0 /* currently active plane */
 		if (plane->crtc_id && (plane->crtc_id != crtc_id))
 			goto plane_next;
 
 		if (plane->fb_id && !plane->crtc_id)
 			goto plane_next;
-#else
+#else /* currently unused plane */
 		if (plane->crtc_id || plane->fb_id)
 			goto plane_next;
 #endif
@@ -717,7 +718,8 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 	return 0;
 }
 
-static void buffer_fill(struct test *test, struct buffer *buffer, int frame)
+static void
+buffer_prefill(struct test *test, struct buffer *buffer)
 {
 	uint32_t *data = buffer->map;
 	int offset = 0;
@@ -726,25 +728,89 @@ static void buffer_fill(struct test *test, struct buffer *buffer, int frame)
 	for (y = 0; y < test->height; y++) {
 		for (x = 0; x < test->width; x++) {
 			data[offset] =
-				((frame & 0xFF) << 0) |
-				((x & 0xFF) << 8) |
-				((y & 0xFF) << 16);
+				(x & 0xFF) | ((y & 0xFF) << 8);
 			offset++;
 		}
 	}
 }
+
+/*
+ * This draws an outline, and center lines to tell us which frame it is.
+ */
+static void
+buffer_fill(struct test *test, struct buffer *buffer, uint8_t frame)
+{
+	uint8_t *data = buffer->map;
+	int i = 0, end;
+
+	for (i = 2; i < buffer->size; i += buffer->pitch)
+		data[i] = frame;
+
+	for (i = (buffer->pitch >> 1) + 2; i < buffer->size; i += buffer->pitch)
+		data[i] = frame;
+
+	for (i = (buffer->pitch - 4) + 2; i < buffer->size; i += buffer->pitch)
+		data[i] = frame;
+
+	for (i = 2; i < buffer->pitch; i += 4)
+		data[i] = frame;
+
+	i = (buffer->size >> 1) - buffer->pitch + 2;
+	end = buffer->size >> 1;
+	for (; i < end; i += 4)
+		data[i] = frame;
+
+	i = (buffer->size >> 1) + 2;
+	end = (buffer->size >> 1) + buffer->pitch;
+	for (; i < end; i += 4)
+		data[i] = frame;
+
+	i = buffer->size - buffer->pitch + 2;
+	for (; i < buffer->size; i += 4)
+		data[i] = frame;
+}
+
+static struct timespec timespec_start;
+
+static void
+time_start(void)
+{
+	if (clock_gettime(CLOCK_MONOTONIC, &timespec_start)) {
+		fprintf(stderr, "Error: failed to get time: %s\n",
+			strerror(errno));
+		return;
+	}
+}
+
+static void
+time_stop(const char *action)
+{
+	struct timespec stop = { 0 };
+	int usec;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &stop)) {
+		fprintf(stderr, "Error: failed to get time: %s\n",
+			strerror(errno));
+		return;
+	}
+
+	usec = (stop.tv_sec - timespec_start.tv_sec) * 1000000;
+	usec += (stop.tv_nsec - timespec_start.tv_nsec) / 1000;
+
+	printf("%s took %4dus.\n", action, usec);
+}
+
 
 static int
 kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 {
 	int ret;
 
+	time_start();
 	buffer_fill(test, buffer, frame);
+	time_stop("buffer_fill");
 
-	/*
-	 * << 16? when did that bs happen?
-	 * Also, since when do we fail with just "einval"?
-	 */
+	/* Since when do we fail with just "einval"? */
 	ret = drmModeSetPlane(test->kms_fd, test->plane_id, test->crtc_id,
 			      buffer->fb_id, 0,
 			      0, 0, test->width, test->height,
@@ -792,8 +858,19 @@ main(int argc, char *argv[])
 	ret = kms_buffer_get(test, test->buffers[0]);
 	if (ret)
 		return ret;
+	buffer_prefill(test, test->buffers[0]);
 
-	ret = kms_plane_display(test, test->buffers[0], 0x0F);
+	ret = kms_buffer_get(test, test->buffers[1]);
+	if (ret)
+		return ret;
+	buffer_prefill(test, test->buffers[1]);
+
+	ret = kms_buffer_get(test, test->buffers[2]);
+	if (ret)
+		return ret;
+	buffer_prefill(test, test->buffers[2]);
+
+	ret = kms_plane_display(test, test->buffers[0], 0xFF);
 	if (ret)
 		return ret;
 

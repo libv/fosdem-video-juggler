@@ -1,4 +1,4 @@
-CFLAGS += -Wall -Iinclude -O0
+CFLAGS += -Wall -Iinclude -O3
 
 # add drm
 CFLAGS += $(shell pkg-config --cflags libdrm)
