@@ -57,7 +57,7 @@ struct test {
 
 	/* actual buffers */
 	int buffer_count;
-	struct buffer buffers[3][1];
+	struct buffer buffers[2][1];
 
 	/* property ids -- how clunky is this? */
 	uint32_t plane_property_crtc_id;
@@ -770,6 +770,7 @@ buffer_fill(struct test *test, struct buffer *buffer, uint8_t frame)
 		data[i] = frame;
 }
 
+#if 0
 static struct timespec timespec_start;
 
 static void
@@ -799,22 +800,39 @@ time_stop(const char *action)
 
 	printf("%s took %4dus.\n", action, usec);
 }
-
+#endif
 
 static int
 kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 {
+	static bool initialized = false;
 	int ret;
 
-	time_start();
 	buffer_fill(test, buffer, frame);
-	time_stop("buffer_fill");
 
-	/* Since when do we fail with just "einval"? */
-	ret = drmModeSetPlane(test->kms_fd, test->plane_id, test->crtc_id,
-			      buffer->fb_id, 0,
-			      0, 0, test->width, test->height,
-			      0, 0, test->width << 16, test->height << 16);
+	if (!initialized) {
+		/* Since when do we fail with just "einval"? */
+		ret = drmModeSetPlane(test->kms_fd, test->plane_id,
+				      test->crtc_id, buffer->fb_id, 0,
+				      0, 0, test->width, test->height,
+				      0, 0, test->width << 16,
+				      test->height << 16);
+
+		initialized = true;
+	} else {
+		drmModeAtomicReqPtr request = drmModeAtomicAlloc();
+
+		drmModeAtomicAddProperty(request, test->plane_id,
+					 test->plane_property_fb_id,
+					 buffer->fb_id);
+
+		ret = drmModeAtomicCommit(test->kms_fd, request,
+					  DRM_MODE_ATOMIC_ALLOW_MODESET,
+					  NULL);
+
+		drmModeAtomicFree(request);
+	}
+
 	if (ret) {
 		fprintf(stderr,
 			"%s: failed to show plane %02u with fb %02u: %s\n",
@@ -823,8 +841,9 @@ kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 		return -errno;
 	}
 
-	printf("Showing plane %02u with fb %02u for frame %d\n",
+	printf("\rShowing plane %02u with fb %02u for frame %d",
 	       test->plane_id, buffer->fb_id, frame);
+	fflush(stdout);
 
 	return 0;
 }
@@ -833,7 +852,22 @@ int
 main(int argc, char *argv[])
 {
 	struct test test[1] = {{ 0 }};
-	int ret;
+	unsigned int count = 1000;
+	int ret, i;
+
+	if (argc > 1) {
+		ret = sscanf(argv[1], "%d", &count);
+		if (ret != 1) {
+			fprintf(stderr, "%s: failed to fscanf(%s): %s\n",
+				__func__, argv[1], strerror(errno));
+			return -1;
+		}
+
+		if (count < 0)
+			count = 1000;
+	}
+
+	printf("Running for %d frames.\n", count);
 
 	ret = kms_init(test, "sun4i-drm");
 	if (ret)
@@ -865,16 +899,19 @@ main(int argc, char *argv[])
 		return ret;
 	buffer_prefill(test, test->buffers[1]);
 
-	ret = kms_buffer_get(test, test->buffers[2]);
-	if (ret)
-		return ret;
-	buffer_prefill(test, test->buffers[2]);
+	for (i = 0; i < count;) {
+		ret = kms_plane_display(test, test->buffers[0], i);
+		if (ret)
+			return ret;
+		i++;
 
-	ret = kms_plane_display(test, test->buffers[0], 0xFF);
-	if (ret)
-		return ret;
+		ret = kms_plane_display(test, test->buffers[1], i);
+		if (ret)
+			return ret;
+		i++;
+	}
 
-	sleep(30);
+	printf("\n");
 
 	return 0;
 }
