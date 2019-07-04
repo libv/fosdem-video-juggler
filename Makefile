@@ -4,13 +4,13 @@ CFLAGS += -Wall -Iinclude -O3
 CFLAGS += $(shell pkg-config --cflags libdrm)
 LDFLAGS = $(shell pkg-config --libs libdrm)
 
-all: hdmi_test
+all: hdmi_output
 
-hdmi_test: test.o
+hdmi_output: output.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 clean:
-	rm -f hdmi_test
+	rm -f hdmi_output
 	rm -f *.o
 	rm -f *.P
 
