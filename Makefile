@@ -2,15 +2,19 @@ CFLAGS += -Wall -Iinclude -O3
 
 # add drm
 CFLAGS += $(shell pkg-config --cflags libdrm)
-LDFLAGS = $(shell pkg-config --libs libdrm)
+DRM_LDFLAGS = $(shell pkg-config --libs libdrm)
 
-all: hdmi_output
+all: hdmi_output hdmi_capture
 
 hdmi_output: output.o
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) $(DRM_LDFLAGS) -o $@ $^
+
+hdmi_capture: capture.o
+	$(CC) $(CFLAGS) $(V4L2_LDFLAGS) -o $@ $^
 
 clean:
 	rm -f hdmi_output
+	rm -f hdmi_capture
 	rm -f *.o
 	rm -f *.P
 
