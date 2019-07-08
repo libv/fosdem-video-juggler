@@ -40,6 +40,8 @@ int capture_height;
 int capture_stride;
 size_t capture_size;
 
+int capture_buffer_count;
+
 static int
 v4l2_device_find(void)
 {
@@ -122,6 +124,65 @@ v4l2_format_get(void)
 	return 0;
 }
 
+static int
+v4l2_buffers_alloc(void)
+{
+	struct v4l2_requestbuffers request[1] = {{
+			.count = 32,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.memory = V4L2_MEMORY_MMAP,
+		}};
+	int ret;
+
+	ret = ioctl(capture_fd, VIDIOC_REQBUFS, request);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_REQBUFS) failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+	capture_buffer_count = request->count;
+	printf("Requested %d buffers.\n", request->count);
+
+	return 0;
+}
+
+static int
+v4l2_buffer_queue(int index)
+{
+	struct v4l2_buffer buffer[1] = {{
+			.index = index,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.memory = V4L2_MEMORY_MMAP,
+		}};
+	int ret;
+
+	ret = ioctl(capture_fd, VIDIOC_QBUF, buffer);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_QBUF(%d)) failed: "
+			"%s\n", index, strerror(errno));
+		return ret;
+	}
+
+	return 0;
+}
+
+static int
+v4l2_buffers_queue(void)
+{
+	int i, ret;
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		ret = v4l2_buffer_queue(i);
+		if (ret)
+			return ret;
+	}
+
+	printf("Queued %d buffers.\n", i);
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
@@ -131,6 +192,14 @@ int main(int argc, char *argv[])
 		return -capture_fd;
 
 	ret = v4l2_format_get();
+	if (ret)
+		return ret;
+
+	ret = v4l2_buffers_alloc();
+	if (ret)
+		return ret;
+
+	ret = v4l2_buffers_queue();
 	if (ret)
 		return ret;
 
