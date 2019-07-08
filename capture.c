@@ -26,12 +26,19 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <inttypes.h>
 
 #include <linux/videodev2.h>
 
 int capture_fd = -1;
 
 char *v4l2_device_card_name = "sun4i_csi1";
+
+enum v4l2_buf_type capture_type = -1;
+int capture_width;
+int capture_height;
+int capture_stride;
+size_t capture_size;
 
 static int
 v4l2_device_find(void)
@@ -69,7 +76,8 @@ v4l2_device_find(void)
 			return ret;
 		}
 
-		if (!strcmp("sun4i_csi1", (const char *) capability->driver)) {
+		if (!strcmp("sun4i_csi1", (const char *) capability->driver) &&
+		    (capability->device_caps & V4L2_CAP_VIDEO_CAPTURE)) {
 			printf("Found sun4i_csi1 driver as %s.\n",
 			       filename);
 			return fd;
@@ -83,11 +91,48 @@ v4l2_device_find(void)
 	return -ENODEV;
 }
 
+static int
+v4l2_format_get(void)
+{
+	struct v4l2_format format[1] = {{
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+		}};
+	int ret;
+	uint32_t fourcc;
+
+	ret = ioctl(capture_fd, VIDIOC_G_FMT, format);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_G_FMT) failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+	capture_width = format->fmt.pix.width;
+	capture_height = format->fmt.pix.height;
+	capture_stride = format->fmt.pix.bytesperline;
+	capture_size = format->fmt.pix.sizeimage;
+	fourcc = format->fmt.pix.pixelformat;
+
+	printf("Format is %dx%d (%dbytes, %dkB) %C%C%C%C\n",
+	       capture_width, capture_height, capture_stride,
+	       (int) (capture_size >> 10),
+	       (fourcc >> 0) & 0xFF, (fourcc >> 8) & 0xFF,
+	       (fourcc >> 16) & 0xFF, (fourcc >> 24) & 0xFF);
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
+	int ret;
+
 	capture_fd = v4l2_device_find();
 	if (capture_fd < 0)
 		return -capture_fd;
+
+	ret = v4l2_format_get();
+	if (ret)
+		return ret;
 
 	return 0;
 }
