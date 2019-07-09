@@ -250,6 +250,22 @@ v4l2_buffers_queue(void)
 	return 0;
 }
 
+static int
+v4l2_streaming_start(void)
+{
+	int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	int ret;
+
+	ret = ioctl(capture_fd, VIDIOC_STREAMON, &type);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_STREAMON) failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
@@ -271,6 +287,10 @@ int main(int argc, char *argv[])
 		return ret;
 
 	ret = v4l2_buffers_queue();
+	if (ret)
+		return ret;
+
+	ret = v4l2_streaming_start();
 	if (ret)
 		return ret;
 
