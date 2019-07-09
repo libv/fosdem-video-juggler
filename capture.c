@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <inttypes.h>
+#include <sys/mman.h>
 
 #include <linux/videodev2.h>
 
@@ -41,6 +42,11 @@ int capture_stride;
 size_t capture_size;
 
 int capture_buffer_count;
+struct capture_buffer {
+	int index;
+	off_t offset;
+	void *map;
+} *capture_buffers;
 
 static int
 v4l2_device_find(void)
@@ -132,7 +138,7 @@ v4l2_buffers_alloc(void)
 			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
 			.memory = V4L2_MEMORY_MMAP,
 		}};
-	int ret;
+	int ret, i;
 
 	ret = ioctl(capture_fd, VIDIOC_REQBUFS, request);
 	if (ret) {
@@ -143,6 +149,67 @@ v4l2_buffers_alloc(void)
 
 	capture_buffer_count = request->count;
 	printf("Requested %d buffers.\n", request->count);
+
+	capture_buffers = calloc(capture_buffer_count,
+				 sizeof(struct capture_buffer));
+	if (!capture_buffers) {
+		fprintf(stderr, "Failed to allocate buffers structure.\n");
+		return ENOMEM;
+	}
+
+	for (i = 0; i < capture_buffer_count; i++)
+		capture_buffers[i].index = i;
+
+	return 0;
+}
+
+static int
+v4l2_buffer_mmap(int index, struct capture_buffer *buffer)
+{
+	struct v4l2_buffer query[1] = {{
+			.index = buffer->index,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.memory = V4L2_MEMORY_MMAP,
+		}};
+	void *map;
+	int ret;
+
+	ret = ioctl(capture_fd, VIDIOC_QUERYBUF, query);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_QUERYBUF) failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+	buffer->offset = query->m.offset;
+
+	map = mmap(NULL, capture_size, PROT_READ, MAP_SHARED, capture_fd,
+		   buffer->offset);
+	if (map == MAP_FAILED) {
+		fprintf(stderr, "Error: failed to mmap buffer %d: %s\n",
+			buffer->index, strerror(errno));
+		return errno;
+	}
+
+	buffer->map = map;
+
+	printf("Mapped buffer %02d @ 0x%08lX to %p.\n",
+	       buffer->index, buffer->offset, buffer->map);
+
+	return 0;
+}
+
+static int
+v4l2_buffers_mmap(void)
+{
+	int ret, i;
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		ret = v4l2_buffer_mmap(i, &capture_buffers[i]);
+		if (ret)
+			return ret;
+	}
+
+	printf("MMapped %d buffers.\n", i);
 
 	return 0;
 }
@@ -196,6 +263,10 @@ int main(int argc, char *argv[])
 		return ret;
 
 	ret = v4l2_buffers_alloc();
+	if (ret)
+		return ret;
+
+	ret = v4l2_buffers_mmap();
 	if (ret)
 		return ret;
 
