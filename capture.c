@@ -48,6 +48,8 @@ struct capture_buffer {
 	void *map;
 } *capture_buffers;
 
+int capture_frame_count = 24 * 60 * 60 * 60;
+
 static int
 v4l2_device_find(void)
 {
@@ -266,9 +268,28 @@ v4l2_streaming_start(void)
 	return 0;
 }
 
+static int
+v4l2_buffer_dequeue(void)
+{
+	struct v4l2_buffer buffer[1] = {{
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.memory = V4L2_MEMORY_MMAP,
+		}};
+	int ret;
+
+	ret = ioctl(capture_fd, VIDIOC_DQBUF, buffer);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_DQBUF) failed: %s\n",
+			strerror(errno));
+		return -ret;
+	}
+
+	return buffer->index;
+}
+
 int main(int argc, char *argv[])
 {
-	int ret;
+	int ret, i;
 
 	capture_fd = v4l2_device_find();
 	if (capture_fd < 0)
@@ -293,6 +314,19 @@ int main(int argc, char *argv[])
 	ret = v4l2_streaming_start();
 	if (ret)
 		return ret;
+
+	for (i = 0; i < capture_frame_count; i++) {
+		int index = v4l2_buffer_dequeue();
+
+		if (index < 0)
+			return -index;
+
+		printf("Dequeued buffer %d.\n", index);
+
+		v4l2_buffer_queue(index);
+	}
+
+	printf("\nCaptured %d buffers.\n", i);
 
 	return 0;
 }
