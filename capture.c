@@ -39,15 +39,15 @@ enum v4l2_buf_type capture_type = -1;
 int capture_width;
 int capture_height;
 int capture_stride;
-size_t capture_size;
+size_t capture_plane_size;
 
 int capture_frame_offset = -1;
 
 int capture_buffer_count;
 struct capture_buffer {
 	int index;
-	off_t offset;
-	void *map;
+	off_t offset[3];
+	void *map[3];
 } *capture_buffers;
 
 int capture_frame_count = 24 * 60 * 60 * 60;
@@ -89,7 +89,7 @@ v4l2_device_find(void)
 		}
 
 		if (!strcmp("sun4i_csi1", (const char *) capability->driver) &&
-		    (capability->device_caps & V4L2_CAP_VIDEO_CAPTURE)) {
+		    (capability->device_caps & V4L2_CAP_VIDEO_CAPTURE_MPLANE)) {
 			printf("Found sun4i_csi1 driver as %s.\n",
 			       filename);
 			return fd;
@@ -107,8 +107,9 @@ static int
 v4l2_format_get(void)
 {
 	struct v4l2_format format[1] = {{
-			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
 		}};
+	struct v4l2_pix_format_mplane *pixel;
 	int ret;
 	uint32_t fourcc;
 
@@ -119,15 +120,17 @@ v4l2_format_get(void)
 		return ret;
 	}
 
-	capture_width = format->fmt.pix.width;
-	capture_height = format->fmt.pix.height;
-	capture_stride = format->fmt.pix.bytesperline;
-	capture_size = format->fmt.pix.sizeimage;
-	fourcc = format->fmt.pix.pixelformat;
+	pixel = &format->fmt.pix_mp;
 
-	printf("Format is %dx%d (%dbytes, %dkB) %C%C%C%C\n",
+	capture_width = pixel->width;
+	capture_height = pixel->height;
+	capture_stride = pixel->plane_fmt[0].bytesperline;
+	capture_plane_size = pixel->plane_fmt[0].sizeimage;
+	fourcc = pixel->pixelformat;
+
+	printf("Format is %dx%d (3x%dbytes, %dkB) %C%C%C%C\n",
 	       capture_width, capture_height, capture_stride,
-	       (int) (capture_size >> 10),
+	       (int) (capture_plane_size >> 10),
 	       (fourcc >> 0) & 0xFF, (fourcc >> 8) & 0xFF,
 	       (fourcc >> 16) & 0xFF, (fourcc >> 24) & 0xFF);
 
@@ -139,7 +142,7 @@ v4l2_buffers_alloc(void)
 {
 	struct v4l2_requestbuffers request[1] = {{
 			.count = 32,
-			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
 			.memory = V4L2_MEMORY_MMAP,
 		}};
 	int ret, i;
@@ -170,13 +173,15 @@ v4l2_buffers_alloc(void)
 static int
 v4l2_buffer_mmap(int index, struct capture_buffer *buffer)
 {
+	struct v4l2_plane planes[3] = {{ 0 }};
 	struct v4l2_buffer query[1] = {{
 			.index = buffer->index,
-			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
 			.memory = V4L2_MEMORY_MMAP,
+			.length = 3,
+			.m.planes = planes,
 		}};
-	void *map;
-	int ret;
+	int ret, i;
 
 	ret = ioctl(capture_fd, VIDIOC_QUERYBUF, query);
 	if (ret) {
@@ -184,20 +189,25 @@ v4l2_buffer_mmap(int index, struct capture_buffer *buffer)
 			strerror(errno));
 		return ret;
 	}
-	buffer->offset = query->m.offset;
 
-	map = mmap(NULL, capture_size, PROT_READ, MAP_SHARED, capture_fd,
-		   buffer->offset);
-	if (map == MAP_FAILED) {
-		fprintf(stderr, "Error: failed to mmap buffer %d: %s\n",
-			buffer->index, strerror(errno));
-		return errno;
+	for (i = 0; i < 3; i++) {
+		off_t offset = query->m.planes[i].m.mem_offset;
+		void *map;
+
+		map = mmap(NULL, capture_plane_size, PROT_READ, MAP_SHARED,
+			   capture_fd, offset);
+		if (map == MAP_FAILED) {
+			fprintf(stderr, "Error: failed to mmap buffer %d[%d]:"
+				" %s\n", buffer->index, i, strerror(errno));
+			return errno;
+		}
+
+		printf("Mapped buffer %02d[%d] @ 0x%08lX to %p.\n",
+		       buffer->index, i, offset, map);
+
+		buffer->offset[i] = offset;
+		buffer->map[i] = map;
 	}
-
-	buffer->map = map;
-
-	printf("Mapped buffer %02d @ 0x%08lX to %p.\n",
-	       buffer->index, buffer->offset, buffer->map);
 
 	return 0;
 }
@@ -221,14 +231,17 @@ v4l2_buffers_mmap(void)
 static int
 v4l2_buffer_queue(int index)
 {
-	struct v4l2_buffer buffer[1] = {{
+	struct v4l2_plane planes[3] = {{ 0 }};
+	struct v4l2_buffer queue[1] = {{
 			.index = index,
-			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
 			.memory = V4L2_MEMORY_MMAP,
+			.m.planes = planes,
+			.length = 3,
 		}};
 	int ret;
 
-	ret = ioctl(capture_fd, VIDIOC_QBUF, buffer);
+	ret = ioctl(capture_fd, VIDIOC_QBUF, queue);
 	if (ret) {
 		fprintf(stderr, "Error: ioctl(VIDIOC_QBUF(%d)) failed: "
 			"%s\n", index, strerror(errno));
@@ -257,7 +270,7 @@ v4l2_buffers_queue(void)
 static int
 v4l2_streaming_start(void)
 {
-	int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+	int type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	int ret;
 
 	ret = ioctl(capture_fd, VIDIOC_STREAMON, &type);
@@ -273,20 +286,23 @@ v4l2_streaming_start(void)
 static int
 v4l2_buffer_dequeue(void)
 {
-	struct v4l2_buffer buffer[1] = {{
-			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+	struct v4l2_plane planes[3] = {{ 0 }};
+	struct v4l2_buffer dequeue[1] = {{
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
 			.memory = V4L2_MEMORY_MMAP,
+			.m.planes = planes,
+			.length = 3,
 		}};
 	int ret;
 
-	ret = ioctl(capture_fd, VIDIOC_DQBUF, buffer);
+	ret = ioctl(capture_fd, VIDIOC_DQBUF, dequeue);
 	if (ret) {
 		fprintf(stderr, "Error: ioctl(VIDIOC_DQBUF) failed: %s\n",
 			strerror(errno));
 		return -ret;
 	}
 
-	return buffer->index;
+	return dequeue->index;
 }
 
 static void
@@ -339,14 +355,13 @@ capture_buffer_test(int index, int frame)
 {
 	struct capture_buffer *buffer = &capture_buffers[index];
 	uint8_t *red, *green, *blue;
-	off_t offset = capture_width * capture_height;
 	int center_x = (capture_width >> 1);
 	int center_y = (capture_height >> 1);
 
 	/* we have swapped blue and red channels on our system */
-	blue = buffer->map;
-	green = blue + offset;
-	red = green + offset;
+	blue = buffer->map[0];
+	green = buffer->map[1];
+	red = buffer->map[2];
 
 	printf("\rTesting frame %4d (%2d):", frame, index);
 
