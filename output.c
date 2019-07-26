@@ -29,13 +29,19 @@
 #include <drm_fourcc.h>
 
 struct buffer {
-	uint32_t handle; /* dumb buffer handle */
+	int width;
+	int height;
+	uint32_t format;
 
-	int pitch;
-	size_t size;
+	struct plane {
+		uint32_t handle; /* dumb buffer handle */
 
-	uint64_t map_offset;
-	void *map;
+		int pitch;
+		size_t size;
+
+		uint64_t map_offset;
+		void *map;
+	} planes[3];
 
 	uint32_t fb_id;
 };
@@ -653,70 +659,81 @@ kms_plane_get(struct test *test)
 static int
 kms_buffer_get(struct test *test, struct buffer *buffer)
 {
-	struct drm_mode_create_dumb buffer_create = { 0 };
-	struct drm_mode_map_dumb buffer_map = { 0 };
 	uint32_t handles[4] = { 0 };
 	uint32_t pitches[4] = { 0 };
 	uint32_t offsets[4] = { 0 };
-	int ret;
+	int ret, i;
 
-	buffer_create.width = test->width;
-	buffer_create.height = test->height;
-	buffer_create.bpp = test->bpp;
-	ret = drmIoctl(test->kms_fd, DRM_IOCTL_MODE_CREATE_DUMB,
-		       &buffer_create);
-	if (ret) {
-		fprintf(stderr, "%s: failed to create buffer: %s\n",
+	buffer->width = test->width;
+	buffer->height = test->height;
+	buffer->format = test->format;
+
+	for (i = 0; i < 3; i++) {
+		struct drm_mode_create_dumb buffer_create = { 0 };
+		struct drm_mode_map_dumb buffer_map = { 0 };
+		struct plane *plane = &buffer->planes[i];
+
+		buffer_create.width = test->width;
+		buffer_create.height = test->height;
+		buffer_create.bpp = 8;
+		ret = drmIoctl(test->kms_fd, DRM_IOCTL_MODE_CREATE_DUMB,
+			       &buffer_create);
+		if (ret) {
+			fprintf(stderr, "%s: failed to create buffer: %s\n",
 			__func__, strerror(errno));
-		return ret;
+			return ret;
+		}
+
+		plane->handle = buffer_create.handle;
+		plane->size = buffer_create.size;
+		plane->pitch = buffer_create.pitch;
+		printf("buffer_plane %d: Created buffer %dx%d@%dbpp: "
+		       "%02u (%dbytes)\n", i, buffer->width, buffer->height,
+		       buffer_create.bpp, plane->handle, plane->size);
+
+		buffer_map.handle = plane->handle;
+		ret = drmIoctl(test->kms_fd, DRM_IOCTL_MODE_MAP_DUMB,
+			       &buffer_map);
+		if (ret) {
+			fprintf(stderr, "%s: failed to map buffer: %s\n",
+				__func__, strerror(errno));
+			return -errno;
+		}
+
+		plane->map_offset = buffer_map.offset;
+		printf("buffer_plane %d: Mapped buffer %02u at offset "
+		       "0x%llX\n", i, plane->handle, plane->map_offset);
+
+		plane->map = mmap(0, plane->size, PROT_READ | PROT_WRITE,
+				   MAP_SHARED, test->kms_fd, plane->map_offset);
+		if (plane->map == MAP_FAILED) {
+			fprintf(stderr, "%s: failed to mmap buffer: %s\n",
+				__func__, strerror(errno));
+			return -errno;
+		}
+
+		printf("buffer_plane %d: MMapped buffer %02u to %p\n",
+		       i, plane->handle, plane->map);
+
+		handles[i] = plane->handle;
+		pitches[i] = plane->pitch;
 	}
 
-	buffer->handle = buffer_create.handle;
-	buffer->size = buffer_create.size;
-	buffer->pitch = buffer_create.pitch;
-	printf("Created buffer %dx%d@%dbpp: %02u (%dbytes)\n",
-	       test->width, test->height, test->bpp,
-	       buffer->handle, buffer->size);
-
-	buffer_map.handle = buffer->handle;
-	ret = drmIoctl(test->kms_fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer_map);
-	if (ret) {
-		fprintf(stderr, "%s: failed to map buffer: %s\n",
-			__func__, strerror(errno));
-		return -errno;
-	}
-
-	buffer->map_offset = buffer_map.offset;
-	printf("Mapped buffer %02u at offset 0x%llX\n", buffer->handle,
-		buffer->map_offset);
-
-	buffer->map = mmap(0, buffer->size, PROT_READ | PROT_WRITE, MAP_SHARED,
-			   test->kms_fd, buffer->map_offset);
-	if (buffer->map == MAP_FAILED) {
-		fprintf(stderr, "%s: failed to mmap buffer: %s\n",
-			__func__, strerror(errno));
-		return -errno;
-	}
-
-	printf("MMapped buffer %02u to %p\n", buffer->handle, buffer->map);
-
-	handles[0] = buffer->handle;
-	pitches[0] = buffer->pitch;
-
-	ret = drmModeAddFB2(test->kms_fd, test->width, test->height,
-			    test->format, handles, pitches, offsets,
+	ret = drmModeAddFB2(test->kms_fd, buffer->width, buffer->height,
+			    buffer->format, handles, pitches, offsets,
 			    &buffer->fb_id, 0);
 	if (ret) {
-		fprintf(stderr, "%s: failed to create fb for buffer %02u: %s\n",
-			__func__, buffer->handle, strerror(errno));
+		fprintf(stderr, "%s: failed to create fb: %s\n",
+			__func__, strerror(errno));
 		return -errno;
 	}
 
-	printf("Created FB %02u from buffer %02u.\n",
-	       buffer->fb_id, buffer->handle);
+	printf("Created FB %02u.\n", buffer->fb_id);
 
 	return 0;
 }
+
+#if 0
 
 static void
 buffer_prefill(struct test *test, struct buffer *buffer)
@@ -770,6 +787,8 @@ buffer_fill(struct test *test, struct buffer *buffer, uint8_t frame)
 		data[i] = frame;
 }
 
+#endif
+
 #if 0
 static struct timespec timespec_start;
 
@@ -808,7 +827,7 @@ kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 	static bool initialized = false;
 	int ret;
 
-	buffer_fill(test, buffer, frame);
+	//buffer_fill(test, buffer, frame);
 
 	if (!initialized) {
 		/* Since when do we fail with just "einval"? */
@@ -884,26 +903,28 @@ main(int argc, char *argv[])
 	printf("Using Plane %02d attached to Crtc %02d\n",
 	       test->plane_id, test->crtc_id);
 
-	test->width = test->crtc_width;
-	test->height = test->crtc_height;
-	test->bpp = 32;
-	test->format = DRM_FORMAT_XRGB8888;
+	test->width = 1024;
+	test->height = 768;
+	test->bpp = 24;
+	test->format = DRM_FORMAT_YUV444;
 
 	ret = kms_buffer_get(test, test->buffers[0]);
 	if (ret)
 		return ret;
-	buffer_prefill(test, test->buffers[0]);
+	//buffer_prefill(test, test->buffers[0]);
 
 	ret = kms_buffer_get(test, test->buffers[1]);
 	if (ret)
 		return ret;
-	buffer_prefill(test, test->buffers[1]);
+	//buffer_prefill(test, test->buffers[1]);
 
 	for (i = 0; i < count;) {
 		ret = kms_plane_display(test, test->buffers[0], i);
 		if (ret)
 			return ret;
 		i++;
+
+		sleep(1000);
 
 		ret = kms_plane_display(test, test->buffers[1], i);
 		if (ret)
