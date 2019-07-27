@@ -63,7 +63,7 @@ struct test {
 
 	/* actual buffers */
 	int buffer_count;
-	struct buffer buffers[2][1];
+	struct buffer buffers[3][1];
 
 	/* property ids -- how clunky is this? */
 	uint32_t plane_property_crtc_id;
@@ -912,11 +912,21 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 	//buffer_prefill(test, test->buffers[0]);
+	memset(test->buffers[0]->planes[0].map, 0xFF,
+	       test->buffers[0]->planes[0].size);
 
 	ret = kms_buffer_get(test, test->buffers[1]);
 	if (ret)
 		return ret;
 	//buffer_prefill(test, test->buffers[1]);
+	memset(test->buffers[1]->planes[1].map, 0xFF,
+	       test->buffers[1]->planes[1].size);
+
+	ret = kms_buffer_get(test, test->buffers[2]);
+	if (ret)
+		return ret;
+	memset(test->buffers[2]->planes[2].map, 0xFF,
+	       test->buffers[2]->planes[2].size);
 
 	for (i = 0; i < count;) {
 		ret = kms_plane_display(test, test->buffers[0], i);
@@ -924,12 +934,21 @@ main(int argc, char *argv[])
 			return ret;
 		i++;
 
-		sleep(1000);
+		sleep(1);
 
 		ret = kms_plane_display(test, test->buffers[1], i);
 		if (ret)
 			return ret;
 		i++;
+
+		sleep(1);
+
+		ret = kms_plane_display(test, test->buffers[2], i);
+		if (ret)
+			return ret;
+		i++;
+
+		sleep(1);
 	}
 
 	printf("\n");
