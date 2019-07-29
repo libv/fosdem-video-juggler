@@ -565,7 +565,7 @@ kms_plane_get(struct test *test)
 #endif
 
 		for (j = 0; j < (int) plane->count_formats; j++)
-			if (plane->formats[j] == DRM_FORMAT_ARGB8888)
+			if (plane->formats[j] == test->format)
 				break;
 
 		if (j == (int) plane->count_formats)
@@ -888,6 +888,11 @@ main(int argc, char *argv[])
 
 	printf("Running for %d frames.\n", count);
 
+	test->width = 1024;
+	test->height = 768;
+	test->bpp = 24;
+	test->format = DRM_FORMAT_R8_G8_B8;
+
 	ret = kms_init(test, "sun4i-drm");
 	if (ret)
 		return ret;
@@ -902,11 +907,6 @@ main(int argc, char *argv[])
 
 	printf("Using Plane %02d attached to Crtc %02d\n",
 	       test->plane_id, test->crtc_id);
-
-	test->width = 1024;
-	test->height = 768;
-	test->bpp = 24;
-	test->format = DRM_FORMAT_YUV444;
 
 	ret = kms_buffer_get(test, test->buffers[0]);
 	if (ret)
