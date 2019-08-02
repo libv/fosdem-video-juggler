@@ -515,26 +515,26 @@ kms_layout_show(struct kms_display *display, const char *name)
 	       display->crtc_id, display->encoder_id, display->connector_id);
 }
 
-#if 0
 static int
-kms_buffer_get(struct test *test, struct buffer *buffer)
+kms_buffer_get(int kms_fd, struct buffer *buffer,
+	       int width, int height, uint32_t format)
 {
 	uint32_t handles[4] = { 0 };
 	uint32_t pitches[4] = { 0 };
 	uint32_t offsets[4] = { 0 };
 	int ret, i;
 
-	buffer->width = test->width;
-	buffer->height = test->height;
-	buffer->format = test->format;
+	buffer->width = width;
+	buffer->height = height;
+	buffer->format = format;
 
 	for (i = 0; i < 3; i++) {
 		struct drm_mode_create_dumb buffer_create = { 0 };
 		struct drm_mode_map_dumb buffer_map = { 0 };
 		struct plane *plane = &buffer->planes[i];
 
-		buffer_create.width = test->width;
-		buffer_create.height = test->height;
+		buffer_create.width = width;
+		buffer_create.height = height;
 		buffer_create.bpp = 8;
 		ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_CREATE_DUMB,
 			       &buffer_create);
@@ -548,7 +548,7 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 		plane->size = buffer_create.size;
 		plane->pitch = buffer_create.pitch;
 		printf("buffer_plane %d: Created buffer %dx%d@%dbpp: "
-		       "%02u (%dbytes)\n", i, buffer->width, buffer->height,
+		       "%02u (%tdbytes)\n", i, buffer->width, buffer->height,
 		       buffer_create.bpp, plane->handle, plane->size);
 
 		buffer_map.handle = plane->handle;
@@ -562,7 +562,7 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 
 		plane->map_offset = buffer_map.offset;
 		printf("buffer_plane %d: Mapped buffer %02u at offset "
-		       "0x%llX\n", i, plane->handle, plane->map_offset);
+		       "0x%jX\n", i, plane->handle, plane->map_offset);
 
 		plane->map = mmap(0, plane->size, PROT_READ | PROT_WRITE,
 				   MAP_SHARED, kms_fd, plane->map_offset);
@@ -592,8 +592,6 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 
 	return 0;
 }
-#endif
-
 
 #if 0
 static int
@@ -723,30 +721,30 @@ main(int argc, char *argv[])
 
 	kms_layout_show(test->hdmi, "HDMI");
 
-#if 0
-	printf("Using Plane %02d attached to Crtc %02d\n",
-	       test->plane_id, test->crtc_id);
-
-	ret = kms_buffer_get(test, test->buffers[0]);
+	ret = kms_buffer_get(test->kms_fd, test->buffers[0],
+			     test->width, test->height, test->format);
 	if (ret)
 		return ret;
 	//buffer_prefill(test, test->buffers[0]);
 	memset(test->buffers[0]->planes[0].map, 0xFF,
 	       test->buffers[0]->planes[0].size);
 
-	ret = kms_buffer_get(test, test->buffers[1]);
+	ret = kms_buffer_get(test->kms_fd, test->buffers[1],
+			     test->width, test->height, test->format);
 	if (ret)
 		return ret;
 	//buffer_prefill(test, test->buffers[1]);
 	memset(test->buffers[1]->planes[1].map, 0xFF,
 	       test->buffers[1]->planes[1].size);
 
-	ret = kms_buffer_get(test, test->buffers[2]);
+	ret = kms_buffer_get(test->kms_fd, test->buffers[2],
+			     test->width, test->height, test->format);
 	if (ret)
 		return ret;
 	memset(test->buffers[2]->planes[2].map, 0xFF,
 	       test->buffers[2]->planes[2].size);
 
+#if 0
 	for (i = 0; i < count;) {
 		ret = kms_plane_display(test, test->buffers[0], i);
 		if (ret)
