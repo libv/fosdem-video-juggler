@@ -504,6 +504,17 @@ kms_plane_properties_get(int kms_fd, struct kms_display *display)
 	return 0;
 }
 
+static void
+kms_layout_show(struct kms_display *display, const char *name)
+{
+	printf("%s: %s, %s\n", name,
+	       display->connected ? "connected" : "disconnected",
+	       display->active ? "active" : "disabled");
+	printf("\tFB -> Plane(0x%02X) -> CRTC(0x%02X) -> Encoder(0x%02X) ->"
+	       " Connector(0x%02X);\n", display->plane_id,
+	       display->crtc_id, display->encoder_id, display->connector_id);
+}
+
 #if 0
 static int
 kms_buffer_get(struct test *test, struct buffer *buffer)
@@ -686,6 +697,8 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
+	kms_layout_show(test->lcd, "LCD");
+
 	/* hdmi connector */
 	ret = kms_connector_id_get(test->kms_fd, test->hdmi,
 				   DRM_MODE_CONNECTOR_HDMIA);
@@ -707,6 +720,8 @@ main(int argc, char *argv[])
 	ret = kms_plane_properties_get(test->kms_fd, test->hdmi);
 	if (ret)
 		return ret;
+
+	kms_layout_show(test->hdmi, "HDMI");
 
 #if 0
 	printf("Using Plane %02d attached to Crtc %02d\n",
