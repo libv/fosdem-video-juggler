@@ -50,6 +50,7 @@ struct buffer {
 
 struct kms_display {
 	bool connected;
+	bool active;
 
 	uint32_t connector_id;
 	uint32_t encoder_id;
@@ -330,6 +331,48 @@ kms_connection_check(int kms_fd, struct kms_display *display)
 	return 0;
 }
 
+static int
+kms_crtc_id_get(int kms_fd, struct kms_display *display)
+{
+	drmModeEncoder *encoder;
+	drmModeCrtc *crtc;
+
+	encoder = drmModeGetEncoder(kms_fd, display->encoder_id);
+	if (!encoder) {
+		fprintf(stderr, "%s: failed to get Encoder %u: %s\n",
+			__func__, display->encoder_id, strerror(errno));
+		return -errno;
+	}
+
+	display->crtc_id = encoder->crtc_id;
+	drmModeFreeEncoder(encoder);
+
+	crtc = drmModeGetCrtc(kms_fd, display->crtc_id);
+	if (!crtc) {
+		fprintf(stderr, "%s: failed to get CRTC %u: %s\n",
+			__func__, display->crtc_id, strerror(errno));
+		return -errno;
+	}
+
+	if (!crtc->mode_valid) {
+		fprintf(stderr, "%s: CRTC %u does not have a valid mode\n",
+			__func__, display->crtc_id);
+
+		display->active = false;
+		drmModeFreeCrtc(crtc);
+
+		return -EINVAL;
+	}
+
+	display->active = true;
+	display->crtc_width = crtc->width;
+	display->crtc_height = crtc->height;
+
+	drmModeFreeCrtc(crtc);
+
+	return 0;
+}
+
 #if 0
 static int
 kms_connector_verify(int kms_fd, struct kms_display *display)
@@ -341,44 +384,6 @@ kms_connector_verify(int kms_fd, struct kms_display *display)
 	drmModeObjectProperties *properties;
 	uint32_t crtc_id, plane_id = 0, encoder_id;
 	int i, j, ret, crtc_index;
-
-	/* Now look for our encoder */
-	encoder = drmModeGetEncoder(kms_fd, display->encoder_id);
-	if (!encoder) {
-		fprintf(stderr, "%s: failed to get Encoder %u: %s\n",
-			__func__, display->encoder_id, strerror(errno));
-		ret = -errno;
-		goto error;
-	}
-
-	printf("Using Encoder %02u\n", display->encoder_id);
-
-	crtc_id = encoder->crtc_id;
-
-	drmModeFreeEncoder(encoder);
-
-	/* Now look for our CRTC */
-	crtc = drmModeGetCrtc(kms_fd, crtc_id);
-	if (!crtc) {
-		fprintf(stderr, "%s: failed to get CRTC %u: %s\n",
-			__func__, crtc_id, strerror(errno));
-		ret = -errno;
-		goto error;
-	}
-
-	if (!crtc->mode_valid) {
-		fprintf(stderr, "%s: CRTC %u does not have a valid mode\n",
-			__func__, crtc_id);
-		ret = -EINVAL;
-		goto error;
-	}
-
-	display->crtc_id = crtc_id;
-	display->crtc_width = crtc->width;
-	display->crtc_height = crtc->height;
-	printf("Using CRTC %02u\n", crtc_id);
-
-	drmModeFreeCrtc(crtc);
 
 	crtc_index = kms_crtc_index_get(test, display->crtc_id);
 
@@ -672,6 +677,10 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
+	ret = kms_crtc_id_get(test->kms_fd, test->lcd);
+	if (ret)
+		return ret;
+
 	ret = kms_connector_id_get(test->kms_fd, test->hdmi,
 				   DRM_MODE_CONNECTOR_HDMIA);
 	if (ret)
@@ -681,6 +690,9 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
+	ret = kms_crtc_id_get(test->kms_fd, test->hdmi);
+	if (ret)
+		return ret;
 #if 0
 	printf("Using Plane %02d attached to Crtc %02d\n",
 	       test->plane_id, test->crtc_id);
