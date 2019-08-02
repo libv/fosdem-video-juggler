@@ -49,8 +49,10 @@ struct buffer {
 };
 
 struct kms_display {
-	uint32_t connector_id;
+	bool connected;
 
+	uint32_t connector_id;
+	uint32_t encoder_id;
 	uint32_t crtc_id;
 	int crtc_width;
 	int crtc_height;
@@ -86,6 +88,14 @@ struct test {
 
 	struct kms_display lcd[1];
 	struct kms_display hdmi[1];
+
+	/*
+	 * kms is soo clunky, here we track the index position of the
+	 * actual crtc ids.
+	 */
+#define CRTC_INDEX_COUNT_MAX 2
+	uint32_t crtc_index[CRTC_INDEX_COUNT_MAX];
+	int crtc_index_count;
 };
 
 static int
@@ -200,7 +210,7 @@ kms_connection_string(drmModeConnection connection)
 }
 
 static int
-kms_connector_get(int kms_fd, struct kms_display *display, uint32_t type)
+kms_connector_id_get(int kms_fd, struct kms_display *display, uint32_t type)
 {
 	drmModeRes *resources;
 	drmModeConnector *connector = NULL;
@@ -249,23 +259,17 @@ kms_connector_get(int kms_fd, struct kms_display *display, uint32_t type)
 	return ret;
 }
 
-#if 0
 /*
- * DRM/KMS clunk galore.
+ * KMS planes come with a bitmask, flagging which crtcs they can be
+ * connected to. But our handles to crtcs are ids, not an index. So
+ * we need to harvest the order of the crtcs from the main kms
+ * resources structure. WTF?
  */
 static int
-kms_display_get(struct test *test, struct kms_display *plane,
-		uint32_t connector_type)
+kms_crtc_indices_get(struct test *test)
 {
 	drmModeRes *resources;
-	drmModeConnector *connector = NULL;
-	drmModeEncoder *encoder;
-	drmModeCrtc *crtc;
-	drmModePlaneRes *resources_plane = NULL;
-	drmModePlane *plane;
-	drmModeObjectProperties *properties;
-	uint32_t crtc_id, plane_id = 0, encoder_id, connector_id;
-	int i, j, ret, crtc_index;
+	int i;
 
 	resources = drmModeGetResources(test->kms_fd);
 	if (!resources) {
@@ -274,58 +278,87 @@ kms_display_get(struct test *test, struct kms_display *plane,
 		return -EINVAL;
 	}
 
-	/* First, scan through our connectors. */
-        for (i = 0; i < resources->count_connectors; i++) {
-		connector_id = resources->connectors[i];
+	if (resources->count_crtcs > CRTC_INDEX_COUNT_MAX)
+		test->crtc_index_count = CRTC_INDEX_COUNT_MAX;
+	else
+		test->crtc_index_count = resources->count_crtcs;
 
-		connector = drmModeGetConnector(test->kms_fd, connector_id);
-		if (!connector) {
-			fprintf(stderr,
-				"%s: failed to get Connector %u: %s\n",
-				__func__, connector_id, strerror(errno));
-			ret = -errno;
-			goto error;
-		}
+	for (i = 0; i < test->crtc_index_count; i++)
+		test->crtc_index[i] = resources->crtcs[i];
 
-		if ((connector->connector_type == DRM_MODE_CONNECTOR_HDMIA) &&
-		    (connector->connection == DRM_MODE_CONNECTED))
-			break;
+	drmModeFreeResources(resources);
+	return 0;
+}
 
-		drmModeFreeConnector(connector);
+static int
+kms_crtc_index_get(struct test *test, uint32_t id)
+{
+	int i;
+
+	for (i = 0; i < test->crtc_index_count; i++)
+		if (test->crtc_index[i] == id)
+			return i;
+
+	fprintf(stderr, "%s: failed to find crtc %u\n", __func__, id);
+	return -EINVAL;
+}
+
+/*
+ * DRM/KMS clunk galore.
+ */
+static int
+kms_connection_check(int kms_fd, struct kms_display *display)
+{
+	drmModeConnector *connector = NULL;
+
+	/* Check whether our connector is connected. */
+	connector = drmModeGetConnector(kms_fd, display->connector_id);
+	if (!connector) {
+		fprintf(stderr, "%s: failed to get Connector %u: %s\n",
+			__func__, display->connector_id, strerror(errno));
+		return -errno;
 	}
 
-	if (i == resources->count_connectors) {
-		fprintf(stderr, "%s: no active HDMI connector found.\n",
-			__func__);
-		ret = -ENODEV;
-		goto error;
+	if (connector->connection != DRM_MODE_CONNECTED) {
+		display->connected = false;
+	} else {
+		display->connected = true;
+		display->encoder_id = connector->encoder_id;
 	}
-
-	if (connector->connection != DRM_MODE
-
-	printf("Using HDMI Connector %02u\n", connector->connector_id);
-
-	encoder_id = connector->encoder_id;
 
 	drmModeFreeConnector(connector);
+	return 0;
+}
+
+#if 0
+static int
+kms_connector_verify(int kms_fd, struct kms_display *display)
+{
+	drmModeEncoder *encoder;
+	drmModeCrtc *crtc;
+	drmModePlaneRes *resources_plane = NULL;
+	drmModePlane *plane;
+	drmModeObjectProperties *properties;
+	uint32_t crtc_id, plane_id = 0, encoder_id;
+	int i, j, ret, crtc_index;
 
 	/* Now look for our encoder */
-	encoder = drmModeGetEncoder(test->kms_fd, encoder_id);
+	encoder = drmModeGetEncoder(kms_fd, display->encoder_id);
 	if (!encoder) {
 		fprintf(stderr, "%s: failed to get Encoder %u: %s\n",
-			__func__, encoder_id, strerror(errno));
+			__func__, display->encoder_id, strerror(errno));
 		ret = -errno;
 		goto error;
 	}
 
-	printf("Using Encoder %02u\n", encoder_id);
+	printf("Using Encoder %02u\n", display->encoder_id);
 
 	crtc_id = encoder->crtc_id;
 
 	drmModeFreeEncoder(encoder);
 
 	/* Now look for our CRTC */
-	crtc = drmModeGetCrtc(test->kms_fd, crtc_id);
+	crtc = drmModeGetCrtc(kms_fd, crtc_id);
 	if (!crtc) {
 		fprintf(stderr, "%s: failed to get CRTC %u: %s\n",
 			__func__, crtc_id, strerror(errno));
@@ -340,23 +373,19 @@ kms_display_get(struct test *test, struct kms_display *plane,
 		goto error;
 	}
 
-	test->crtc_id = crtc_id;
-	test->crtc_width = crtc->width;
-	test->crtc_height = crtc->height;
+	display->crtc_id = crtc_id;
+	display->crtc_width = crtc->width;
+	display->crtc_height = crtc->height;
 	printf("Using CRTC %02u\n", crtc_id);
 
 	drmModeFreeCrtc(crtc);
 
-	/* Now get the crtc index, so we can see which planes work */
-	for (i = 0; i < resources->count_crtcs; i++)
-		if (resources->crtcs[i] == crtc_id)
-			break;
-	crtc_index = i;
+	crtc_index = kms_crtc_index_get(test, display->crtc_id);
 
 	printf("CRTC has index %d\n", crtc_index);
 
 	/* Get plane resources so we can start sifting through the planes */
-	resources_plane = drmModeGetPlaneResources(test->kms_fd);
+	resources_plane = drmModeGetPlaneResources(kms_fd);
 	if (!resources_plane) {
 		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
 			__func__);
@@ -368,7 +397,7 @@ kms_display_get(struct test *test, struct kms_display *plane,
 	for (i = 0; i < (int) resources_plane->count_planes; i++) {
 		plane_id = resources_plane->planes[i];
 
-		plane = drmModeGetPlane(test->kms_fd, plane_id);
+		plane = drmModeGetPlane(kms_fd, plane_id);
 		if (!plane) {
 			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
 				__func__, plane_id, strerror(errno));
@@ -408,10 +437,9 @@ kms_display_get(struct test *test, struct kms_display *plane,
 	printf("Using Plane %02u\n", plane_id);
 
 	drmModeFreePlaneResources(resources_plane);
-	drmModeFreeResources(resources);
 
 	/* now that we have our plane, get the relevant property ids */
-	properties = drmModeObjectGetProperties(test->kms_fd, plane_id,
+	properties = drmModeObjectGetProperties(kms_fd, plane_id,
 						DRM_MODE_OBJECT_PLANE);
 	if (!properties) {
 		/* yes, no properties returns EINVAL */
@@ -426,7 +454,7 @@ kms_display_get(struct test *test, struct kms_display *plane,
 		for (i = 0; i < (int) properties->count_props; i++) {
 			drmModePropertyRes *property;
 
-			property = drmModeGetProperty(test->kms_fd,
+			property = drmModeGetProperty(kms_fd,
 						      properties->props[i]);
 			if (!property) {
 				fprintf(stderr, "Failed to get object %u "
@@ -496,7 +524,7 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 		buffer_create.width = test->width;
 		buffer_create.height = test->height;
 		buffer_create.bpp = 8;
-		ret = drmIoctl(test->kms_fd, DRM_IOCTL_MODE_CREATE_DUMB,
+		ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_CREATE_DUMB,
 			       &buffer_create);
 		if (ret) {
 			fprintf(stderr, "%s: failed to create buffer: %s\n",
@@ -512,7 +540,7 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 		       buffer_create.bpp, plane->handle, plane->size);
 
 		buffer_map.handle = plane->handle;
-		ret = drmIoctl(test->kms_fd, DRM_IOCTL_MODE_MAP_DUMB,
+		ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_MAP_DUMB,
 			       &buffer_map);
 		if (ret) {
 			fprintf(stderr, "%s: failed to map buffer: %s\n",
@@ -525,7 +553,7 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 		       "0x%llX\n", i, plane->handle, plane->map_offset);
 
 		plane->map = mmap(0, plane->size, PROT_READ | PROT_WRITE,
-				   MAP_SHARED, test->kms_fd, plane->map_offset);
+				   MAP_SHARED, kms_fd, plane->map_offset);
 		if (plane->map == MAP_FAILED) {
 			fprintf(stderr, "%s: failed to mmap buffer: %s\n",
 				__func__, strerror(errno));
@@ -539,7 +567,7 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 		pitches[i] = plane->pitch;
 	}
 
-	ret = drmModeAddFB2(test->kms_fd, buffer->width, buffer->height,
+	ret = drmModeAddFB2(kms_fd, buffer->width, buffer->height,
 			    buffer->format, handles, pitches, offsets,
 			    &buffer->fb_id, 0);
 	if (ret) {
@@ -564,7 +592,7 @@ kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 
 	if (!initialized) {
 		/* Since when do we fail with just "einval"? */
-		ret = drmModeSetPlane(test->kms_fd, test->plane_id,
+		ret = drmModeSetPlane(kms_fd, test->plane_id,
 				      test->crtc_id, buffer->fb_id, 0,
 				      0, 0, test->width, test->height,
 				      0, 0, test->width << 16,
@@ -578,7 +606,7 @@ kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 					 test->plane_property_fb_id,
 					 buffer->fb_id);
 
-		ret = drmModeAtomicCommit(test->kms_fd, request,
+		ret = drmModeAtomicCommit(kms_fd, request,
 					  DRM_MODE_ATOMIC_ALLOW_MODESET,
 					  NULL);
 
@@ -631,11 +659,25 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
-	ret = kms_connector_get(test->kms_fd, test->lcd, DRM_MODE_CONNECTOR_DPI);
+	ret = kms_crtc_indices_get(test);
 	if (ret)
 		return ret;
 
-	ret = kms_connector_get(test->kms_fd, test->hdmi, DRM_MODE_CONNECTOR_HDMIA);
+	ret = kms_connector_id_get(test->kms_fd, test->lcd,
+				   DRM_MODE_CONNECTOR_DPI);
+	if (ret)
+		return ret;
+
+	ret = kms_connection_check(test->kms_fd, test->lcd);
+	if (ret)
+		return ret;
+
+	ret = kms_connector_id_get(test->kms_fd, test->hdmi,
+				   DRM_MODE_CONNECTOR_HDMIA);
+	if (ret)
+		return ret;
+
+	ret = kms_connection_check(test->kms_fd, test->hdmi);
 	if (ret)
 		return ret;
 
