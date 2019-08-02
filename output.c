@@ -67,11 +67,11 @@ struct kms_display {
 	uint32_t plane_property_crtc_y;
 	uint32_t plane_property_crtc_w;
 	uint32_t plane_property_crtc_h;
-	uint32_t plane_property_in_x;
-	uint32_t plane_property_in_y;
-	uint32_t plane_property_in_w;
-	uint32_t plane_property_in_h;
-	uint32_t plane_property_in_formats;
+	uint32_t plane_property_src_x;
+	uint32_t plane_property_src_y;
+	uint32_t plane_property_src_w;
+	uint32_t plane_property_src_h;
+	uint32_t plane_property_src_formats;
 };
 
 struct test {
@@ -485,16 +485,18 @@ kms_plane_properties_get(int kms_fd, struct kms_display *display)
 			display->plane_property_crtc_w = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_H"))
 			display->plane_property_crtc_h = property->prop_id;
-		else if (!strcmp(property->name, "IN_X"))
-			display->plane_property_in_x = property->prop_id;
-		else if (!strcmp(property->name, "IN_Y"))
-			display->plane_property_in_y = property->prop_id;
-		else if (!strcmp(property->name, "IN_W"))
-			display->plane_property_in_w = property->prop_id;
-		else if (!strcmp(property->name, "IN_H"))
-			display->plane_property_in_h = property->prop_id;
-		else if (!strcmp(property->name, "IN_FORMATS"))
-			display->plane_property_in_formats = property->prop_id;
+		else if (!strcmp(property->name, "SRC_X"))
+			display->plane_property_src_x = property->prop_id;
+		else if (!strcmp(property->name, "SRC_Y"))
+			display->plane_property_src_y = property->prop_id;
+		else if (!strcmp(property->name, "SRC_W"))
+			display->plane_property_src_w = property->prop_id;
+		else if (!strcmp(property->name, "SRC_H"))
+			display->plane_property_src_h = property->prop_id;
+		//		else if (!strcmp(property->name, "IN_FORMATS"))
+		//	display->plane_property_src_formats = property->prop_id;
+		else
+			printf("Unhandled property: %s\n", property->name);
 
 		drmModeFreeProperty(property);
 	}
@@ -639,6 +641,72 @@ kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 }
 #endif
 
+static void
+kms_plane_hdmi_set(struct kms_display *display, struct buffer *buffer,
+		   drmModeAtomicReqPtr request)
+{
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_crtc_id,
+				 display->crtc_id);
+
+	/* top right quadrant */
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_crtc_x, 0);
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_crtc_y, 0);
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_crtc_w,
+				 display->crtc_width);
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_crtc_h,
+				 display->crtc_height);
+
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_src_x, 0);
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_src_y, 0);
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_src_w,
+				 buffer->width << 16);
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_src_h,
+				 buffer->height << 16);
+
+	/* actual flip. */
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_fb_id,
+				 buffer->fb_id);
+}
+
+static int
+kms_buffer_show(struct test *test, struct buffer *buffer, int frame)
+{
+	drmModeAtomicReqPtr request;
+	int ret;
+
+	request = drmModeAtomicAlloc();
+
+	kms_plane_hdmi_set(test->lcd, buffer, request);
+	kms_plane_hdmi_set(test->hdmi, buffer, request);
+
+	ret = drmModeAtomicCommit(test->kms_fd, request,
+				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+
+	drmModeAtomicFree(request);
+
+	if (ret) {
+		fprintf(stderr, "%s: failed to show fb %02u: %s\n",
+			__func__, buffer->fb_id, strerror(errno));
+		ret = -errno;
+	} else {
+		printf("\rShowing fb %02u for frame %d", buffer->fb_id, frame);
+		fflush(stdout);
+	}
+
+	return ret;
+
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -744,6 +812,9 @@ main(int argc, char *argv[])
 	memset(test->buffers[2]->planes[2].map, 0xFF,
 	       test->buffers[2]->planes[2].size);
 
+
+	kms_buffer_show(test, test->buffers[0], 1);
+	sleep(10000);
 #if 0
 	for (i = 0; i < count;) {
 		ret = kms_plane_display(test, test->buffers[0], i);
