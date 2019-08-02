@@ -373,24 +373,20 @@ kms_crtc_id_get(int kms_fd, struct kms_display *display)
 	return 0;
 }
 
-#if 0
+
 static int
-kms_connector_verify(int kms_fd, struct kms_display *display)
+kms_plane_id_get(struct test *test, struct kms_display *display,
+		 uint32_t format)
 {
-	drmModeEncoder *encoder;
-	drmModeCrtc *crtc;
 	drmModePlaneRes *resources_plane = NULL;
 	drmModePlane *plane;
-	drmModeObjectProperties *properties;
-	uint32_t crtc_id, plane_id = 0, encoder_id;
+	uint32_t plane_id = 0;
 	int i, j, ret, crtc_index;
 
 	crtc_index = kms_crtc_index_get(test, display->crtc_id);
 
-	printf("CRTC has index %d\n", crtc_index);
-
 	/* Get plane resources so we can start sifting through the planes */
-	resources_plane = drmModeGetPlaneResources(kms_fd);
+	resources_plane = drmModeGetPlaneResources(test->kms_fd);
 	if (!resources_plane) {
 		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
 			__func__);
@@ -402,7 +398,7 @@ kms_connector_verify(int kms_fd, struct kms_display *display)
 	for (i = 0; i < (int) resources_plane->count_planes; i++) {
 		plane_id = resources_plane->planes[i];
 
-		plane = drmModeGetPlane(kms_fd, plane_id);
+		plane = drmModeGetPlane(test->kms_fd, plane_id);
 		if (!plane) {
 			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
 				__func__, plane_id, strerror(errno));
@@ -438,75 +434,75 @@ kms_connector_verify(int kms_fd, struct kms_display *display)
 		goto error;
 	}
 
-	test->plane_id = plane_id;
-	printf("Using Plane %02u\n", plane_id);
+	display->plane_id = plane_id;
+	ret = 0;
 
+ error:
 	drmModeFreePlaneResources(resources_plane);
+	return ret;
+}
+
+static int
+kms_plane_properties_get(int kms_fd, struct kms_display *display)
+{
+	drmModeObjectProperties *properties;
+	int i;
 
 	/* now that we have our plane, get the relevant property ids */
-	properties = drmModeObjectGetProperties(kms_fd, plane_id,
+	properties = drmModeObjectGetProperties(kms_fd, display->plane_id,
 						DRM_MODE_OBJECT_PLANE);
 	if (!properties) {
 		/* yes, no properties returns EINVAL */
 		if (errno != EINVAL) {
 			fprintf(stderr,
 				"Failed to get object %u properties: %s\n",
-				plane_id, strerror(errno));
-			ret = -errno;
-			goto error;
+				display->plane_id, strerror(errno));
+			return -errno;
 		}
-	} else {
-		for (i = 0; i < (int) properties->count_props; i++) {
-			drmModePropertyRes *property;
-
-			property = drmModeGetProperty(kms_fd,
-						      properties->props[i]);
-			if (!property) {
-				fprintf(stderr, "Failed to get object %u "
-					"property %u: %s\n", plane_id,
-					properties->props[i], strerror(errno));
-				continue;
-			}
-
-			if (!strcmp(property->name, "CRTC_ID"))
-				test->plane_property_crtc_id =
-					property->prop_id;
-			else if (!strcmp(property->name, "FB_ID"))
-				test->plane_property_fb_id = property->prop_id;
-			else if (!strcmp(property->name, "CRTC_X"))
-				test->plane_property_crtc_x = property->prop_id;
-			else if (!strcmp(property->name, "CRTC_Y"))
-				test->plane_property_crtc_y = property->prop_id;
-			else if (!strcmp(property->name, "CRTC_W"))
-				test->plane_property_crtc_w = property->prop_id;
-			else if (!strcmp(property->name, "CRTC_H"))
-				test->plane_property_crtc_h = property->prop_id;
-			else if (!strcmp(property->name, "IN_X"))
-				test->plane_property_in_x = property->prop_id;
-			else if (!strcmp(property->name, "IN_Y"))
-				test->plane_property_in_y = property->prop_id;
-			else if (!strcmp(property->name, "IN_W"))
-				test->plane_property_in_w = property->prop_id;
-			else if (!strcmp(property->name, "IN_H"))
-				test->plane_property_in_h = property->prop_id;
-			else if (!strcmp(property->name, "IN_FORMATS"))
-				test->plane_property_in_formats =
-					property->prop_id;
-
-			drmModeFreeProperty(property);
-		}
-
-		drmModeFreeObjectProperties(properties);
+		return 0;
 	}
 
-	return 0;
- error:
-	drmModeFreePlaneResources(resources_plane);
-	drmModeFreeResources(resources);
+	for (i = 0; i < (int) properties->count_props; i++) {
+		drmModePropertyRes *property;
 
-	return ret;
+		property = drmModeGetProperty(kms_fd, properties->props[i]);
+		if (!property) {
+			fprintf(stderr, "Failed to get object %u "
+				"property %u: %s\n", display->plane_id,
+				properties->props[i], strerror(errno));
+			continue;
+		}
+
+		if (!strcmp(property->name, "CRTC_ID"))
+			display->plane_property_crtc_id = property->prop_id;
+		else if (!strcmp(property->name, "FB_ID"))
+			display->plane_property_fb_id = property->prop_id;
+		else if (!strcmp(property->name, "CRTC_X"))
+			display->plane_property_crtc_x = property->prop_id;
+		else if (!strcmp(property->name, "CRTC_Y"))
+			display->plane_property_crtc_y = property->prop_id;
+		else if (!strcmp(property->name, "CRTC_W"))
+			display->plane_property_crtc_w = property->prop_id;
+		else if (!strcmp(property->name, "CRTC_H"))
+			display->plane_property_crtc_h = property->prop_id;
+		else if (!strcmp(property->name, "IN_X"))
+			display->plane_property_in_x = property->prop_id;
+		else if (!strcmp(property->name, "IN_Y"))
+			display->plane_property_in_y = property->prop_id;
+		else if (!strcmp(property->name, "IN_W"))
+			display->plane_property_in_w = property->prop_id;
+		else if (!strcmp(property->name, "IN_H"))
+			display->plane_property_in_h = property->prop_id;
+		else if (!strcmp(property->name, "IN_FORMATS"))
+			display->plane_property_in_formats = property->prop_id;
+
+		drmModeFreeProperty(property);
+	}
+
+	drmModeFreeObjectProperties(properties);
+
+	return 0;
 }
-#endif
 
 #if 0
 static int
@@ -668,6 +664,7 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
+	/* LCD connector */
 	ret = kms_connector_id_get(test->kms_fd, test->lcd,
 				   DRM_MODE_CONNECTOR_DPI);
 	if (ret)
@@ -681,6 +678,15 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
+	ret = kms_plane_id_get(test, test->lcd, test->format);
+	if (ret)
+		return ret;
+
+	ret = kms_plane_properties_get(test->kms_fd, test->lcd);
+	if (ret)
+		return ret;
+
+	/* hdmi connector */
 	ret = kms_connector_id_get(test->kms_fd, test->hdmi,
 				   DRM_MODE_CONNECTOR_HDMIA);
 	if (ret)
@@ -693,6 +699,15 @@ main(int argc, char *argv[])
 	ret = kms_crtc_id_get(test->kms_fd, test->hdmi);
 	if (ret)
 		return ret;
+
+	ret = kms_plane_id_get(test, test->hdmi, test->format);
+	if (ret)
+		return ret;
+
+	ret = kms_plane_properties_get(test->kms_fd, test->hdmi);
+	if (ret)
+		return ret;
+
 #if 0
 	printf("Using Plane %02d attached to Crtc %02d\n",
 	       test->plane_id, test->crtc_id);
