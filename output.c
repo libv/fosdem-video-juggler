@@ -28,6 +28,8 @@
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
 
+#define __maybe_unused  __attribute__((unused))
+
 struct buffer {
 	int width;
 	int height;
@@ -46,24 +48,14 @@ struct buffer {
 	uint32_t fb_id;
 };
 
-struct test {
-	int kms_fd;
+struct kms_display {
+	uint32_t connector_id;
 
 	uint32_t crtc_id;
 	int crtc_width;
 	int crtc_height;
 
 	uint32_t plane_id;
-
-	/* buffer info */
-	int width;
-	int height;
-	int bpp;
-	uint32_t format;
-
-	/* actual buffers */
-	int buffer_count;
-	struct buffer buffers[3][1];
 
 	/* property ids -- how clunky is this? */
 	uint32_t plane_property_crtc_id;
@@ -77,6 +69,23 @@ struct test {
 	uint32_t plane_property_in_w;
 	uint32_t plane_property_in_h;
 	uint32_t plane_property_in_formats;
+};
+
+struct test {
+	int kms_fd;
+
+	/* buffer info */
+	int width;
+	int height;
+	int bpp;
+	uint32_t format;
+
+	/* actual buffers */
+	int buffer_count;
+	struct buffer buffers[3][1];
+
+	struct kms_display lcd[1];
+	struct kms_display hdmi[1];
 };
 
 static int
@@ -108,146 +117,7 @@ kms_init(struct test *test, const char *driver_name)
 
 	return 0;
 }
-
-static void
-kms_object_properties_print(int fd, uint32_t id, uint32_t type)
-{
-	drmModeObjectProperties *properties;
-	int i, j;
-
-	properties = drmModeObjectGetProperties(fd, id, type);
-	if (!properties) {
-		/* yes, no properties returns EINVAL */
-		if (errno != EINVAL)
-			fprintf(stderr,
-				"Failed to get object %u properties: %s\n",
-				id, strerror(errno));
-		return;
-	}
-
-	printf("\t\t   Properties:\n");
-	for (i = 0; i < (int) properties->count_props; i++) {
-		drmModePropertyRes *property;
-
-		property = drmModeGetProperty(fd, properties->props[i]);
-		if (!property) {
-			fprintf(stderr,
-				"Failed to get object %u property %u: %s\n",
-				id, properties->props[i], strerror(errno));
-			continue;
-		}
-
-		printf("\t\t\t%02d: %s flags 0x%X:",
-		       property->prop_id, property->name, property->flags);
-
-		if ((property->flags & DRM_MODE_PROP_RANGE) ||
-		    (property->flags & DRM_MODE_PROP_SIGNED_RANGE)) {
-			printf(" [");
-			for (j = 0; j < property->count_values; j++) {
-				if (j)
-					printf(":");
-				if (property->flags & DRM_MODE_PROP_RANGE)
-					printf("0x%llX", property->values[j]);
-				else if (((int64_t) property->values[j]) < 0)
-					printf("-0x%llX", - ((int64_t) property->values[j]));
-				else
-					printf("0x%llX", (int64_t) property->values[j]);
-			}
-			printf("]");
-		}
-		printf("\n");
-
-		drmModeFreeProperty(property);
-	}
-
-	drmModeFreeObjectProperties(properties);
-}
-
-static void
-kms_fb_print(int fd, uint32_t id)
-{
-	drmModeFB *fb;
-
-	fb = drmModeGetFB(fd, id);
-	if (!fb) {
-		fprintf(stderr, "Failed to get FB %u: %s\n", id,
-			strerror(errno));
-		return;
-	}
-
-	printf("\t\t%02d: %4dx%4d(%4d)@%d/%d\n", fb->fb_id,
-	       fb->width, fb->height, fb->pitch, fb->depth, fb->bpp);
-
-	drmModeFreeFB(fb);
-
-	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_FB);
-}
-
-static void
-kms_plane_print(int fd, uint32_t id)
-{
-	drmModePlane *plane;
-	int i;
-
-	plane = drmModeGetPlane(fd, id);
-	if (!plane) {
-		fprintf(stderr, "Failed to get Plane %u: %s\n", id,
-			strerror(errno));
-		return;
-	}
-
-	printf("\t\t%02d: FB %02d, CRTC %02d, Possible CRTCs 0x%02X\n",
-	       plane->plane_id, plane->fb_id, plane->crtc_id,
-	       plane->possible_crtcs);
-	printf("\t\t   Supported Formats:");
-	for (i = 0; i < (int) plane->count_formats; i++) {
-		if (((i - 7) % 9) == 0)
-			printf("\n\t\t\t");
-		printf(" %C%C%C%C,", plane->formats[i] & 0xFF,
-		       (plane->formats[i] >> 8) & 0xFF,
-		       (plane->formats[i] >> 16) & 0xFF,
-		       (plane->formats[i] >> 24) & 0xFF);
-	}
-	printf("\n");
-
-	drmModeFreePlane(plane);
-
-	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_PLANE);
-
-}
-
-static void
-kms_crtc_print(int fd, uint32_t id)
-{
-	drmModeCrtc *crtc;
-
-	crtc = drmModeGetCrtc(fd, id);
-	if (!crtc) {
-		fprintf(stderr, "Failed to get CRTC %u: %s\n", id,
-			strerror(errno));
-		return;
-	}
-
-	printf("\t\t%02d: FB %02d: %4d,%4d / %4dx%4d; Mode \"%s\"%s\n",
-	       crtc->crtc_id, crtc->buffer_id, crtc->x, crtc->y,
-	       crtc->width, crtc->height, crtc->mode.name,
-	       crtc->mode_valid ? " (valid)" : "");
-
-#if 0
-	if (crtc->buffer_id) {
-		/* For a laugh, try to get the FB connected to the CRTC,
-		   even if it isn't listed */
-		printf("Attached FB:\n");
-		kms_fb_print(fd, crtc->buffer_id);
-	}
-#endif
-
-	drmModeFreeCrtc(crtc);
-
-	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_CRTC);
-}
-
-static char *
+static __maybe_unused char *
 kms_encoder_string(uint32_t encoder)
 {
 	struct {
@@ -273,29 +143,7 @@ kms_encoder_string(uint32_t encoder)
 	return table[0].name;
 }
 
-static void
-kms_encoder_print(int fd, uint32_t id)
-{
-	drmModeEncoder *encoder;
-
-	encoder = drmModeGetEncoder(fd, id);
-	if (!encoder) {
-		fprintf(stderr, "Failed to get Encoder %u: %s\n", id,
-			strerror(errno));
-		return;
-	}
-
-	printf("\t\t%02d: %s, Crtc %02d. Possible Crtcs: 0x%02X, "
-	       "Possible Clones: 0x%02X\n", encoder->encoder_id,
-	       kms_encoder_string(encoder->encoder_type), encoder->crtc_id,
-	       encoder->possible_crtcs, encoder->possible_clones);
-
-	drmModeFreeEncoder(encoder);
-
-	kms_object_properties_print(fd, id, DRM_MODE_OBJECT_ENCODER);
-}
-
-static char *
+static __maybe_unused char *
 kms_connector_string(uint32_t connector)
 {
 	struct {
@@ -330,7 +178,7 @@ kms_connector_string(uint32_t connector)
 	return table[0].name;
 }
 
-static char *
+static __maybe_unused char *
 kms_connection_string(drmModeConnection connection)
 {
 	struct {
@@ -351,87 +199,63 @@ kms_connection_string(drmModeConnection connection)
 	return "connection unknown";
 }
 
-static void
-kms_connector_print(int fd, uint32_t id)
-{
-	drmModeConnector *connector;
-	int i;
-
-	connector = drmModeGetConnector(fd, id);
-	if (!connector) {
-		fprintf(stderr, "%s: failed to get Connector %u: %s\n",
-			__func__, id, strerror(errno));
-		return;
-	}
-
-	printf("\t\t%02d: %s %1d, %s, Encoder %02d\n",
-	       connector->connector_id,
-	       kms_connector_string(connector->connector_type),
-	       connector->connector_type_id,
-	       kms_connection_string(connector->connection),
-	       connector->encoder_id);
-	printf("\t\t   Possible encoders:");
-	for (i = 0; i < connector->count_encoders; i++)
-		printf(" %02d,", connector->encoders[i]);
-	printf("\n");
-
-	drmModeFreeConnector(connector);
-}
-
-int
-kms_resources_list(int fd)
+static int
+kms_connector_get(int kms_fd, struct kms_display *display, uint32_t type)
 {
 	drmModeRes *resources;
-	drmModePlaneRes *resources_plane;
-	int i;
+	drmModeConnector *connector = NULL;
+	uint32_t connector_id = 0;
+	int i, ret;
 
-	resources = drmModeGetResources(fd);
+	resources = drmModeGetResources(kms_fd);
 	if (!resources) {
 		fprintf(stderr, "%s: Failed to get KMS resources: %s\n",
 			__func__, strerror(errno));
 		return -EINVAL;
 	}
 
-	resources_plane = drmModeGetPlaneResources(fd);
-	if (!resources_plane) {
-		fprintf(stderr, "Failed to get KMS plane resources\n");
-		drmModeFreeResources(resources);
-		return -EINVAL;
+	/* First, scan through our connectors. */
+        for (i = 0; i < resources->count_connectors; i++) {
+		connector_id = resources->connectors[i];
+
+		connector = drmModeGetConnector(kms_fd, connector_id);
+		if (!connector) {
+			fprintf(stderr,
+				"%s: failed to get Connector %u: %s\n",
+				__func__, connector_id, strerror(errno));
+			ret = -errno;
+			goto error;
+		}
+
+		if (connector->connector_type == type)
+			break;
+
+		drmModeFreeConnector(connector);
 	}
 
-	printf("KMS resources:\n");
-	printf("\tDimensions: (%d, %d) -> (%d, %d)\n",
-	     resources->min_width, resources->min_height,
-	     resources->max_width, resources->max_height);
+	if (i == resources->count_connectors) {
+		fprintf(stderr, "%s: no connector found for %s.\n",
+			__func__, kms_connector_string(type));
+		ret = -ENODEV;
+		goto error;
+	}
 
-	printf("\tFBs:\n");
-	for (i = 0; i < resources->count_fbs; i++)
-		kms_fb_print(fd, resources->fbs[i]);
+	display->connector_id = connector_id;
+	drmModeFreeConnector(connector);
+	ret = 0;
 
-	printf("\tPlanes:\n");
-	for (i = 0; i < (int) resources_plane->count_planes; i++)
-		kms_plane_print(fd, resources_plane->planes[i]);
-
-	printf("\tCRTCs:\n");
-	for (i = 0; i < resources->count_crtcs; i++)
-		kms_crtc_print(fd, resources->crtcs[i]);
-
-	printf("\tEncoders:\n");
-	for (i = 0; i < resources->count_encoders; i++)
-		kms_encoder_print(fd, resources->encoders[i]);
-
-	printf("\tConnectors:\n");
-	for (i = 0; i < resources->count_connectors; i++)
-		kms_connector_print(fd, resources->connectors[i]);
-
+ error:
 	drmModeFreeResources(resources);
-	drmModeFreePlaneResources(resources_plane);
-
-	return 0;
+	return ret;
 }
 
+#if 0
+/*
+ * DRM/KMS clunk galore.
+ */
 static int
-kms_plane_get(struct test *test)
+kms_display_get(struct test *test, struct kms_display *plane,
+		uint32_t connector_type)
 {
 	drmModeRes *resources;
 	drmModeConnector *connector = NULL;
@@ -476,6 +300,8 @@ kms_plane_get(struct test *test)
 		ret = -ENODEV;
 		goto error;
 	}
+
+	if (connector->connection != DRM_MODE
 
 	printf("Using HDMI Connector %02u\n", connector->connector_id);
 
@@ -553,16 +379,8 @@ kms_plane_get(struct test *test)
 		if (!(plane->possible_crtcs & (1 << crtc_index)))
 			goto plane_next;
 
-#if 0 /* currently active plane */
-		if (plane->crtc_id && (plane->crtc_id != crtc_id))
-			goto plane_next;
-
-		if (plane->fb_id && !plane->crtc_id)
-			goto plane_next;
-#else /* currently unused plane */
 		if (plane->crtc_id || plane->fb_id)
 			goto plane_next;
-#endif
 
 		for (j = 0; j < (int) plane->count_formats; j++)
 			if (plane->formats[j] == test->format)
@@ -655,7 +473,9 @@ kms_plane_get(struct test *test)
 
 	return ret;
 }
+#endif
 
+#if 0
 static int
 kms_buffer_get(struct test *test, struct buffer *buffer)
 {
@@ -732,102 +552,15 @@ kms_buffer_get(struct test *test, struct buffer *buffer)
 
 	return 0;
 }
-
-#if 0
-
-static void
-buffer_prefill(struct test *test, struct buffer *buffer)
-{
-	uint32_t *data = buffer->map;
-	int offset = 0;
-	int x, y;
-
-	for (y = 0; y < test->height; y++) {
-		for (x = 0; x < test->width; x++) {
-			data[offset] =
-				(x & 0xFF) | ((y & 0xFF) << 8);
-			offset++;
-		}
-	}
-}
-
-/*
- * This draws an outline, and center lines to tell us which frame it is.
- */
-static void
-buffer_fill(struct test *test, struct buffer *buffer, uint8_t frame)
-{
-	uint8_t *data = buffer->map;
-	int i = 0, end;
-
-	for (i = 2; i < buffer->size; i += buffer->pitch)
-		data[i] = frame;
-
-	for (i = (buffer->pitch >> 1) + 2; i < buffer->size; i += buffer->pitch)
-		data[i] = frame;
-
-	for (i = (buffer->pitch - 4) + 2; i < buffer->size; i += buffer->pitch)
-		data[i] = frame;
-
-	for (i = 2; i < buffer->pitch; i += 4)
-		data[i] = frame;
-
-	i = (buffer->size >> 1) - buffer->pitch + 2;
-	end = buffer->size >> 1;
-	for (; i < end; i += 4)
-		data[i] = frame;
-
-	i = (buffer->size >> 1) + 2;
-	end = (buffer->size >> 1) + buffer->pitch;
-	for (; i < end; i += 4)
-		data[i] = frame;
-
-	i = buffer->size - buffer->pitch + 2;
-	for (; i < buffer->size; i += 4)
-		data[i] = frame;
-}
-
 #endif
 
+
 #if 0
-static struct timespec timespec_start;
-
-static void
-time_start(void)
-{
-	if (clock_gettime(CLOCK_MONOTONIC, &timespec_start)) {
-		fprintf(stderr, "Error: failed to get time: %s\n",
-			strerror(errno));
-		return;
-	}
-}
-
-static void
-time_stop(const char *action)
-{
-	struct timespec stop = { 0 };
-	int usec;
-
-	if (clock_gettime(CLOCK_MONOTONIC, &stop)) {
-		fprintf(stderr, "Error: failed to get time: %s\n",
-			strerror(errno));
-		return;
-	}
-
-	usec = (stop.tv_sec - timespec_start.tv_sec) * 1000000;
-	usec += (stop.tv_nsec - timespec_start.tv_nsec) / 1000;
-
-	printf("%s took %4dus.\n", action, usec);
-}
-#endif
-
 static int
 kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 {
 	static bool initialized = false;
 	int ret;
-
-	//buffer_fill(test, buffer, frame);
 
 	if (!initialized) {
 		/* Since when do we fail with just "einval"? */
@@ -866,13 +599,14 @@ kms_plane_display(struct test *test, struct buffer *buffer, int frame)
 
 	return 0;
 }
+#endif
 
 int
 main(int argc, char *argv[])
 {
 	struct test test[1] = {{ 0 }};
 	unsigned int count = 1000;
-	int ret, i;
+	int ret; //, i;
 
 	if (argc > 1) {
 		ret = sscanf(argv[1], "%d", &count);
@@ -897,14 +631,15 @@ main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
-	ret = kms_resources_list(test->kms_fd);
+	ret = kms_connector_get(test->kms_fd, test->lcd, DRM_MODE_CONNECTOR_DPI);
 	if (ret)
 		return ret;
 
-	ret = kms_plane_get(test);
+	ret = kms_connector_get(test->kms_fd, test->hdmi, DRM_MODE_CONNECTOR_HDMIA);
 	if (ret)
 		return ret;
 
+#if 0
 	printf("Using Plane %02d attached to Crtc %02d\n",
 	       test->plane_id, test->crtc_id);
 
@@ -952,6 +687,7 @@ main(int argc, char *argv[])
 	}
 
 	printf("\n");
+#endif
 
 	return 0;
 }
