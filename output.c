@@ -50,6 +50,7 @@ struct buffer {
 
 struct kms_display {
 	bool connected;
+	bool mode_ok;
 	bool active;
 
 	uint32_t connector_id;
@@ -358,13 +359,13 @@ kms_crtc_id_get(int kms_fd, struct kms_display *display)
 		fprintf(stderr, "%s: CRTC %u does not have a valid mode\n",
 			__func__, display->crtc_id);
 
-		display->active = false;
+		display->mode_ok = false;
 		drmModeFreeCrtc(crtc);
 
 		return -EINVAL;
 	}
 
-	display->active = true;
+	display->mode_ok = true;
 	display->crtc_width = crtc->width;
 	display->crtc_height = crtc->height;
 
@@ -509,9 +510,9 @@ kms_plane_properties_get(int kms_fd, struct kms_display *display)
 static void
 kms_layout_show(struct kms_display *display, const char *name)
 {
-	printf("%s: %s, %s\n", name,
+	printf("%s: %s, mode: %s\n", name,
 	       display->connected ? "connected" : "disconnected",
-	       display->active ? "active" : "disabled");
+	       display->mode_ok ? "set" : "disabled");
 	printf("\tFB -> Plane(0x%02X) -> CRTC(0x%02X) -> Encoder(0x%02X) ->"
 	       " Connector(0x%02X);\n", display->plane_id,
 	       display->crtc_id, display->encoder_id, display->connector_id);
@@ -595,82 +596,39 @@ kms_buffer_get(int kms_fd, struct buffer *buffer,
 	return 0;
 }
 
-#if 0
-static int
-kms_plane_display(struct test *test, struct buffer *buffer, int frame)
-{
-	static bool initialized = false;
-	int ret;
-
-	if (!initialized) {
-		/* Since when do we fail with just "einval"? */
-		ret = drmModeSetPlane(kms_fd, test->plane_id,
-				      test->crtc_id, buffer->fb_id, 0,
-				      0, 0, test->width, test->height,
-				      0, 0, test->width << 16,
-				      test->height << 16);
-
-		initialized = true;
-	} else {
-		drmModeAtomicReqPtr request = drmModeAtomicAlloc();
-
-		drmModeAtomicAddProperty(request, test->plane_id,
-					 test->plane_property_fb_id,
-					 buffer->fb_id);
-
-		ret = drmModeAtomicCommit(kms_fd, request,
-					  DRM_MODE_ATOMIC_ALLOW_MODESET,
-					  NULL);
-
-		drmModeAtomicFree(request);
-	}
-
-	if (ret) {
-		fprintf(stderr,
-			"%s: failed to show plane %02u with fb %02u: %s\n",
-			__func__, test->plane_id, buffer->fb_id,
-			strerror(errno));
-		return -errno;
-	}
-
-	printf("\rShowing plane %02u with fb %02u for frame %d",
-	       test->plane_id, buffer->fb_id, frame);
-	fflush(stdout);
-
-	return 0;
-}
-#endif
-
 static void
 kms_plane_hdmi_set(struct kms_display *display, struct buffer *buffer,
 		   drmModeAtomicReqPtr request)
 {
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_crtc_id,
-				 display->crtc_id);
 
-	/* top right quadrant */
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_crtc_x, 0);
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_crtc_y, 0);
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_crtc_w,
-				 display->crtc_width);
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_crtc_h,
-				 display->crtc_height);
+	if (!display->active) {
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_id,
+					 display->crtc_id);
 
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_src_x, 0);
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_src_y, 0);
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_src_w,
-				 buffer->width << 16);
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_src_h,
-				 buffer->height << 16);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_x, 0);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_y, 0);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_w,
+					 display->crtc_width);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_h,
+					 display->crtc_height);
+
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_src_x, 0);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_src_y, 0);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_src_w,
+					 buffer->width << 16);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_src_h,
+					 buffer->height << 16);
+		display->active = true;
+	}
 
 	/* actual flip. */
 	drmModeAtomicAddProperty(request, display->plane_id,
@@ -712,7 +670,7 @@ main(int argc, char *argv[])
 {
 	struct test test[1] = {{ 0 }};
 	unsigned int count = 1000;
-	int ret; //, i;
+	int ret, i;
 
 	if (argc > 1) {
 		ret = sscanf(argv[1], "%d", &count);
@@ -728,8 +686,8 @@ main(int argc, char *argv[])
 
 	printf("Running for %d frames.\n", count);
 
-	test->width = 1024;
-	test->height = 768;
+	test->width = 1920;
+	test->height = 1080;
 	test->bpp = 24;
 	test->format = DRM_FORMAT_R8_G8_B8;
 
@@ -812,26 +770,22 @@ main(int argc, char *argv[])
 	memset(test->buffers[2]->planes[2].map, 0xFF,
 	       test->buffers[2]->planes[2].size);
 
-
-	kms_buffer_show(test, test->buffers[0], 1);
-	sleep(10000);
-#if 0
 	for (i = 0; i < count;) {
-		ret = kms_plane_display(test, test->buffers[0], i);
+		ret = kms_buffer_show(test, test->buffers[0], i);
 		if (ret)
 			return ret;
 		i++;
 
-		sleep(1);
+		//sleep(1);
 
-		ret = kms_plane_display(test, test->buffers[1], i);
+		ret = kms_buffer_show(test, test->buffers[1], i);
 		if (ret)
 			return ret;
 		i++;
 
-		sleep(1);
+		//sleep(1);
 
-		ret = kms_plane_display(test, test->buffers[2], i);
+		ret = kms_buffer_show(test, test->buffers[2], i);
 		if (ret)
 			return ret;
 		i++;
@@ -840,7 +794,6 @@ main(int argc, char *argv[])
 	}
 
 	printf("\n");
-#endif
 
 	return 0;
 }
