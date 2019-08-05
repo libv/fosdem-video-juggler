@@ -596,27 +596,106 @@ kms_buffer_get(int kms_fd, struct buffer *buffer,
 	return 0;
 }
 
+/*
+ * Show input buffer on projector, scaled, with borders.
+ */
 static void
 kms_plane_hdmi_set(struct kms_display *display, struct buffer *buffer,
 		   drmModeAtomicReqPtr request)
 {
 
 	if (!display->active) {
+		int x, y, w, h;
+
 		drmModeAtomicAddProperty(request, display->plane_id,
 					 display->plane_property_crtc_id,
 					 display->crtc_id);
 
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_x, 0);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_y, 0);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_w,
-					 display->crtc_width);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_h,
-					 display->crtc_height);
+		/* Scale, with borders, and center */
+		if ((buffer->width == display->crtc_width) &&
+		    (buffer->height == display->crtc_height)) {
+			x = 0;
+			y = 0;
+			w = display->crtc_width;
+			h = display->crtc_height;
+		} else {
+			/* first, try to fit horizontally. */
+			w = display->crtc_width;
+			h = buffer->height * display->crtc_width /
+				buffer->width;
 
+			/* if height does not fit, inverse the logic */
+			if (h > display->crtc_height) {
+				h = display->crtc_height;
+				w = buffer->width * display->crtc_height /
+					buffer->height;
+			}
+
+			/* center */
+			x = (display->crtc_width - w) / 2;
+			y = (display->crtc_height -h) / 2;
+		}
+
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_x, x);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_y, y);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_w, w);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_h, h);
+
+		/* read in full size image */
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_src_x, 0);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_src_y, 0);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_src_w,
+					 buffer->width << 16);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_src_h,
+					 buffer->height << 16);
+		display->active = true;
+	}
+
+	/* actual flip. */
+	drmModeAtomicAddProperty(request, display->plane_id,
+				 display->plane_property_fb_id,
+				 buffer->fb_id);
+}
+
+/*
+ * Show input buffer on the status lcd, in the top right corner.
+ */
+static void
+kms_plane_lcd_set(struct kms_display *display, struct buffer *buffer,
+		   drmModeAtomicReqPtr request)
+{
+
+	if (!display->active) {
+		int x, y, w, h;
+
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_id,
+					 display->crtc_id);
+
+		/* top right corner */
+		x = display->crtc_width / 2;
+		y = 0;
+		w = display->crtc_width / 2;
+		h = buffer->height * w / buffer->width;
+
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_x, x);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_y, y);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_w, w);
+		drmModeAtomicAddProperty(request, display->plane_id,
+					 display->plane_property_crtc_h, h);
+
+		/* read in full size image */
 		drmModeAtomicAddProperty(request, display->plane_id,
 					 display->plane_property_src_x, 0);
 		drmModeAtomicAddProperty(request, display->plane_id,
@@ -644,7 +723,7 @@ kms_buffer_show(struct test *test, struct buffer *buffer, int frame)
 
 	request = drmModeAtomicAlloc();
 
-	kms_plane_hdmi_set(test->lcd, buffer, request);
+	kms_plane_lcd_set(test->lcd, buffer, request);
 	kms_plane_hdmi_set(test->hdmi, buffer, request);
 
 	ret = drmModeAtomicCommit(test->kms_fd, request,
@@ -686,8 +765,8 @@ main(int argc, char *argv[])
 
 	printf("Running for %d frames.\n", count);
 
-	test->width = 1920;
-	test->height = 1080;
+	test->width = 1280;
+	test->height = 720;
 	test->bpp = 24;
 	test->format = DRM_FORMAT_R8_G8_B8;
 
@@ -790,7 +869,7 @@ main(int argc, char *argv[])
 			return ret;
 		i++;
 
-		sleep(1);
+		//sleep(1);
 	}
 
 	printf("\n");
