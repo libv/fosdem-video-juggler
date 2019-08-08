@@ -31,6 +31,10 @@
 
 #include <linux/videodev2.h>
 
+#include <pthread.h>
+
+#include "capture.h"
+
 int capture_fd = -1;
 
 char *v4l2_device_card_name = "sun4i_csi1";
@@ -50,7 +54,8 @@ struct capture_buffer {
 	void *map[3];
 } *capture_buffers;
 
-int capture_frame_count = 24 * 60 * 60 * 60;
+pthread_t capture_thread[1];
+pthread_mutex_t buffer_mutex[1];
 
 static int
 v4l2_device_find(void)
@@ -495,48 +500,84 @@ capture_buffer_test(int index, int frame)
 				  capture_width - 1, center_y + 1);
 }
 
-int main(int argc, char *argv[])
+static void *
+capture_thread_handler(void *arg)
 {
+	unsigned long count = (unsigned long) arg;
 	int ret, i;
 
 	capture_fd = v4l2_device_find();
 	if (capture_fd < 0)
-		return -capture_fd;
+		return NULL;
 
 	ret = v4l2_format_get();
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = v4l2_buffers_alloc();
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = v4l2_buffers_mmap();
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = v4l2_buffers_queue();
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = v4l2_streaming_start();
 	if (ret)
-		return ret;
+		return NULL;
 
-	for (i = 0; i < capture_frame_count; i++) {
+	for (i = 0; i < count; i++) {
 		int index = v4l2_buffer_dequeue();
 
 		if (index < 0)
-			return -index;
+			return NULL;
+
+
+		ret = pthread_mutex_lock(buffer_mutex);
+		if (ret)
+			fprintf(stderr, "%s: error locking mutex: %s\n",
+				__func__, strerror(ret));
 
 		/* frame 0 starts at a random line anyway */
 		if (i)
 			capture_buffer_test(index, i);
 
 		v4l2_buffer_queue(index);
+
+		ret = pthread_mutex_unlock(buffer_mutex);
+		if (ret)
+			fprintf(stderr, "%s: error unlocking mutex: %s\n",
+				__func__, strerror(ret));
 	}
 
 	printf("\nCaptured %d buffers.\n", i);
 
+	return NULL;
+}
+
+int
+capture_init(unsigned long count)
+{
+	int ret;
+
+	pthread_mutex_init(buffer_mutex, NULL);
+
+	ret = pthread_create(capture_thread, NULL, capture_thread_handler,
+			     (void *) count);
+	if (ret)
+		fprintf(stderr, "%s() failed: %s\n", __func__, strerror(ret));
+
 	return 0;
+}
+
+void
+capture_destroy(void)
+{
+	/* do we actually want to clean up anything, or do we just exit()? */
+
+	pthread_mutex_destroy(buffer_mutex);
 }

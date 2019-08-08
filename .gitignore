@@ -1,5 +1,4 @@
 *~
 *.o
 *.P
-hdmi_output
-hdmi_capture
+juggler

@@ -1,20 +1,19 @@
 CFLAGS += -Wall -Iinclude -O3
+LDFLAGS += -pthread
 
 # add drm
 CFLAGS += $(shell pkg-config --cflags libdrm)
 DRM_LDFLAGS = $(shell pkg-config --libs libdrm)
 
-all: hdmi_output hdmi_capture
+LDFLAGS += $(DRM_LDFLAGS)
 
-hdmi_output: output.o
-	$(CC) $(CFLAGS) $(DRM_LDFLAGS) -o $@ $^
+all: juggler
 
-hdmi_capture: capture.o
-	$(CC) $(CFLAGS) $(V4L2_LDFLAGS) -o $@ $^
+juggler: output.o capture.o
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 clean:
-	rm -f hdmi_output
-	rm -f hdmi_capture
+	rm -f juggler
 	rm -f *.o
 	rm -f *.P
 

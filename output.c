@@ -28,6 +28,8 @@
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
 
+#include "capture.h"
+
 #define __maybe_unused  __attribute__((unused))
 
 struct buffer {
@@ -824,6 +826,10 @@ main(int argc, char *argv[])
 		return ret;
 
 	kms_layout_show(test->hdmi, "HDMI");
+
+	ret = capture_init(count);
+	if (ret)
+		return ret;
 
 	ret = kms_buffer_get(test->kms_fd, test->buffers[0],
 			     test->width, test->height, test->format);
