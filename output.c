@@ -374,7 +374,9 @@ kms_crtc_id_get(int kms_fd, struct kms_display *display)
 	return 0;
 }
 
-
+/*
+ * Todo, make sure that we use a plane only once.
+ */
 static int
 kms_plane_id_get(struct test *test, struct kms_display *display,
 		 uint32_t format)
@@ -408,9 +410,6 @@ kms_plane_id_get(struct test *test, struct kms_display *display,
 		}
 
 		if (!(plane->possible_crtcs & (1 << crtc_index)))
-			goto plane_next;
-
-		if (plane->crtc_id || plane->fb_id)
 			goto plane_next;
 
 		for (j = 0; j < (int) plane->count_formats; j++)
