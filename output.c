@@ -764,8 +764,8 @@ main(int argc, char *argv[])
 
 	printf("Running for %d frames.\n", count);
 
-	test->width = 1280;
-	test->height = 720;
+	test->width = 1024;
+	test->height = 768;
 	test->bpp = 24;
 	test->format = DRM_FORMAT_R8_G8_B8;
 
