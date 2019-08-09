@@ -9,7 +9,7 @@ LDFLAGS += $(DRM_LDFLAGS)
 
 all: juggler
 
-juggler: output.o capture.o
+juggler: kms.o capture.o juggler.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 clean:

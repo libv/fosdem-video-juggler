@@ -23,14 +23,14 @@
 #include <errno.h>
 #include <sys/mman.h>
 #include <time.h>
+#include <inttypes.h>
 
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
 
-#include "capture.h"
-
-#define __maybe_unused  __attribute__((unused))
+#include "juggler.h"
+#include "kms.h"
 
 struct buffer {
 	int width;
@@ -103,7 +103,7 @@ struct test {
 };
 
 static int
-kms_init(struct test *test, const char *driver_name)
+kms_fd_init(struct test *test, const char *driver_name)
 {
 	int ret;
 
@@ -746,32 +746,17 @@ kms_buffer_show(struct test *test, struct buffer *buffer, int frame)
 }
 
 int
-main(int argc, char *argv[])
+kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 {
 	struct test test[1] = {{ 0 }};
-	unsigned int count = 1000;
 	int ret, i;
 
-	if (argc > 1) {
-		ret = sscanf(argv[1], "%d", &count);
-		if (ret != 1) {
-			fprintf(stderr, "%s: failed to fscanf(%s): %s\n",
-				__func__, argv[1], strerror(errno));
-			return -1;
-		}
+	test->width = width;
+	test->height = height;
+	test->bpp = bpp;
+	test->format = format;
 
-		if (count < 0)
-			count = 1000;
-	}
-
-	printf("Running for %d frames.\n", count);
-
-	test->width = 1024;
-	test->height = 768;
-	test->bpp = 24;
-	test->format = DRM_FORMAT_R8_G8_B8;
-
-	ret = kms_init(test, "sun4i-drm");
+	ret = kms_fd_init(test, "sun4i-drm");
 	if (ret)
 		return ret;
 
@@ -826,10 +811,6 @@ main(int argc, char *argv[])
 		return ret;
 
 	kms_layout_show(test->hdmi, "HDMI");
-
-	ret = capture_init(count);
-	if (ret)
-		return ret;
 
 	ret = kms_buffer_get(test->kms_fd, test->buffers[0],
 			     test->width, test->height, test->format);
