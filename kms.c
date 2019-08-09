@@ -83,6 +83,20 @@ struct kms_display {
 	uint32_t crtc_id;
 	int crtc_width;
 	int crtc_height;
+};
+
+struct kms_status {
+	struct kms *kms;
+
+	struct kms_display display[1];
+
+	struct kms_plane capture[1];
+};
+
+struct kms_projector {
+	struct kms *kms;
+
+	struct kms_display display[1];
 
 	struct kms_plane capture[1];
 };
@@ -100,8 +114,8 @@ struct kms {
 	int buffer_count;
 	struct buffer buffers[3][1];
 
-	struct kms_display status[1];
-	struct kms_display projector[1];
+	struct kms_status status[1];
+	struct kms_projector projector[1];
 
 	/*
 	 * kms is soo clunky, here we track the index position of the
@@ -523,10 +537,9 @@ kms_plane_properties_get(struct kms_plane *plane)
 }
 
 static void
-kms_layout_show(struct kms_display *display, const char *name)
+kms_layout_show(struct kms_display *display, struct kms_plane *plane,
+		const char *name)
 {
-	struct kms_plane *plane = display->capture;
-
 	printf("%s: %s, mode: %s\n", name,
 	       display->connected ? "connected" : "disconnected",
 	       display->mode_ok ? "set" : "disabled");
@@ -617,10 +630,11 @@ kms_buffer_get(int kms_fd, struct buffer *buffer,
  * Show input buffer on projector, scaled, with borders.
  */
 static void
-kms_plane_projector_set(struct kms_display *display, struct buffer *buffer,
+kms_plane_projector_set(struct kms_projector *projector, struct buffer *buffer,
 			drmModeAtomicReqPtr request)
 {
-	struct kms_plane *plane = display->capture;
+	struct kms_display *display = projector->display;
+	struct kms_plane *plane = projector->capture;
 
 	if (!plane->active) {
 		int x, y, w, h;
@@ -687,10 +701,14 @@ kms_plane_projector_set(struct kms_display *display, struct buffer *buffer,
  * HDMI or VGA used for the projector.
  */
 static int
-kms_projector_init(struct kms *kms, struct kms_display *display)
+kms_projector_init(struct kms *kms)
 {
+	struct kms_projector *projector = kms->projector;
+	struct kms_display *display = projector->display;
+	struct kms_plane *plane = projector->capture;
 	int ret;
 
+	projector->kms = kms;
 	display->kms = kms;
 
 	ret = kms_connector_id_get(display, DRM_MODE_CONNECTOR_HDMIA);
@@ -705,17 +723,16 @@ kms_projector_init(struct kms *kms, struct kms_display *display)
 	if (ret)
 		return ret;
 
-	display->capture->plane_id =
-		kms_plane_id_get(display, kms->format);
-	if (!display->capture->plane_id)
+	plane->kms = kms;
+	plane->plane_id = kms_plane_id_get(display, kms->format);
+	if (!plane->plane_id)
 		return -ENODEV;
 
-	display->capture->kms = kms;
-	ret = kms_plane_properties_get(display->capture);
+	ret = kms_plane_properties_get(plane);
 	if (ret)
 		return ret;
 
-	kms_layout_show(display, "Projector");
+	kms_layout_show(display, plane, "Projector");
 
 	return 0;
 }
@@ -724,10 +741,11 @@ kms_projector_init(struct kms *kms, struct kms_display *display)
  * Show input buffer on the status lcd, in the top right corner.
  */
 static void
-kms_plane_status_set(struct kms_display *display, struct buffer *buffer,
+kms_plane_status_set(struct kms_status *status, struct buffer *buffer,
 		     drmModeAtomicReqPtr request)
 {
-	struct kms_plane *plane = display->capture;
+	struct kms_display *display = status->display;
+	struct kms_plane *plane = status->capture;
 
 	if (!plane->active) {
 		int x, y, w, h;
@@ -775,10 +793,14 @@ kms_plane_status_set(struct kms_display *display, struct buffer *buffer,
  * Status LCD.
  */
 static int
-kms_status_init(struct kms *kms, struct kms_display *display)
+kms_status_init(struct kms *kms)
 {
+	struct kms_status *status = kms->status;
+	struct kms_display *display = status->display;
+	struct kms_plane *plane = status->capture;
 	int ret;
 
+	status->kms = kms;
 	display->kms = kms;
 
 	ret = kms_connector_id_get(display, DRM_MODE_CONNECTOR_DPI);
@@ -793,16 +815,16 @@ kms_status_init(struct kms *kms, struct kms_display *display)
 	if (ret)
 		return ret;
 
-	display->capture->plane_id = kms_plane_id_get(display, kms->format);
-	if (!display->capture->plane_id)
+	plane->kms = kms;
+	plane->plane_id = kms_plane_id_get(display, kms->format);
+	if (!plane->plane_id)
 		return -ENODEV;
 
-	display->capture->kms = kms;
-	ret = kms_plane_properties_get(display->capture);
+	ret = kms_plane_properties_get(plane);
 	if (ret)
 		return ret;
 
-	kms_layout_show(display, "Status");
+	kms_layout_show(display, plane, "Status");
 
 	return 0;
 }
@@ -920,11 +942,11 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	ret = kms_status_init(kms, kms->status);
+	ret = kms_status_init(kms);
 	if (ret)
 		return ret;
 
-	ret = kms_projector_init(kms, kms->projector);
+	ret = kms_projector_init(kms);
 	if (ret)
 		return ret;
 
