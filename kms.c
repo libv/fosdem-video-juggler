@@ -836,38 +836,16 @@ kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 
 }
 
-int
-kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
+static int
+kms_buffers_test_create(struct kms *kms)
 {
-	struct kms kms[1] = {{ 0 }};
-	int ret, i;
-
-	kms->width = width;
-	kms->height = height;
-	kms->bpp = bpp;
-	kms->format = format;
-
-	ret = kms_fd_init(kms, "sun4i-drm");
-	if (ret)
-		return ret;
-
-	ret = kms_crtc_indices_get(kms);
-	if (ret)
-		return ret;
-
-	ret = kms_status_init(kms, kms->status);
-	if (ret)
-		return ret;
-
-	ret = kms_projector_init(kms, kms->projector);
-	if (ret)
-		return ret;
+	int ret;
 
 	ret = kms_buffer_get(kms->kms_fd, kms->buffers[0],
 			     kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
-	//buffer_prefill(kms, kms->buffers[0]);
+
 	memset(kms->buffers[0]->planes[0].map, 0xFF,
 	       kms->buffers[0]->planes[0].size);
 
@@ -875,7 +853,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 			     kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
-	//buffer_prefill(kms, kms->buffers[1]);
+
 	memset(kms->buffers[1]->planes[1].map, 0xFF,
 	       kms->buffers[1]->planes[1].size);
 
@@ -883,8 +861,17 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 			     kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
+
 	memset(kms->buffers[2]->planes[2].map, 0xFF,
 	       kms->buffers[2]->planes[2].size);
+
+	return 0;
+}
+
+static int
+kms_buffers_test_show(struct kms *kms, unsigned long count)
+{
+	int ret, i;
 
 	for (i = 0; i < count;) {
 		ret = kms_buffer_show(kms, kms->buffers[0], i);
@@ -910,6 +897,44 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	}
 
 	printf("\n");
+
+	return 0;
+}
+
+int
+kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
+{
+	struct kms kms[1] = {{ 0 }};
+	int ret;
+
+	kms->width = width;
+	kms->height = height;
+	kms->bpp = bpp;
+	kms->format = format;
+
+	ret = kms_fd_init(kms, "sun4i-drm");
+	if (ret)
+		return ret;
+
+	ret = kms_crtc_indices_get(kms);
+	if (ret)
+		return ret;
+
+	ret = kms_status_init(kms, kms->status);
+	if (ret)
+		return ret;
+
+	ret = kms_projector_init(kms, kms->projector);
+	if (ret)
+		return ret;
+
+	ret = kms_buffers_test_create(kms);
+	if (ret)
+		return ret;
+
+	ret = kms_buffers_test_show(kms, count);
+	if (ret)
+		return ret;
 
 	return 0;
 }
