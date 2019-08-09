@@ -224,14 +224,15 @@ kms_connection_string(drmModeConnection connection)
 }
 
 static int
-kms_connector_id_get(int kms_fd, struct kms_display *display, uint32_t type)
+kms_connector_id_get(struct kms_display *display, uint32_t type)
 {
+	struct kms *kms = display->kms;
 	drmModeRes *resources;
 	drmModeConnector *connector = NULL;
 	uint32_t connector_id = 0;
 	int i, ret;
 
-	resources = drmModeGetResources(kms_fd);
+	resources = drmModeGetResources(kms->kms_fd);
 	if (!resources) {
 		fprintf(stderr, "%s: Failed to get KMS resources: %s\n",
 			__func__, strerror(errno));
@@ -242,7 +243,7 @@ kms_connector_id_get(int kms_fd, struct kms_display *display, uint32_t type)
         for (i = 0; i < resources->count_connectors; i++) {
 		connector_id = resources->connectors[i];
 
-		connector = drmModeGetConnector(kms_fd, connector_id);
+		connector = drmModeGetConnector(kms->kms_fd, connector_id);
 		if (!connector) {
 			fprintf(stderr,
 				"%s: failed to get Connector %u: %s\n",
@@ -321,12 +322,13 @@ kms_crtc_index_get(struct kms *kms, uint32_t id)
  * DRM/KMS clunk galore.
  */
 static int
-kms_connection_check(int kms_fd, struct kms_display *display)
+kms_connection_check(struct kms_display *display)
 {
+	struct kms *kms = display->kms;
 	drmModeConnector *connector = NULL;
 
 	/* Check whether our connector is connected. */
-	connector = drmModeGetConnector(kms_fd, display->connector_id);
+	connector = drmModeGetConnector(kms->kms_fd, display->connector_id);
 	if (!connector) {
 		fprintf(stderr, "%s: failed to get Connector %u: %s\n",
 			__func__, display->connector_id, strerror(errno));
@@ -345,12 +347,13 @@ kms_connection_check(int kms_fd, struct kms_display *display)
 }
 
 static int
-kms_crtc_id_get(int kms_fd, struct kms_display *display)
+kms_crtc_id_get(struct kms_display *display)
 {
+	struct kms *kms = display->kms;
 	drmModeEncoder *encoder;
 	drmModeCrtc *crtc;
 
-	encoder = drmModeGetEncoder(kms_fd, display->encoder_id);
+	encoder = drmModeGetEncoder(kms->kms_fd, display->encoder_id);
 	if (!encoder) {
 		fprintf(stderr, "%s: failed to get Encoder %u: %s\n",
 			__func__, display->encoder_id, strerror(errno));
@@ -360,7 +363,7 @@ kms_crtc_id_get(int kms_fd, struct kms_display *display)
 	display->crtc_id = encoder->crtc_id;
 	drmModeFreeEncoder(encoder);
 
-	crtc = drmModeGetCrtc(kms_fd, display->crtc_id);
+	crtc = drmModeGetCrtc(kms->kms_fd, display->crtc_id);
 	if (!crtc) {
 		fprintf(stderr, "%s: failed to get CRTC %u: %s\n",
 			__func__, display->crtc_id, strerror(errno));
@@ -782,16 +785,16 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	/* LCD connector */
 	kms->lcd->kms = kms;
 
-	ret = kms_connector_id_get(kms->kms_fd, kms->lcd,
+	ret = kms_connector_id_get(kms->lcd,
 				   DRM_MODE_CONNECTOR_DPI);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(kms->kms_fd, kms->lcd);
+	ret = kms_connection_check(kms->lcd);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_id_get(kms->kms_fd, kms->lcd);
+	ret = kms_crtc_id_get(kms->lcd);
 	if (ret)
 		return ret;
 
@@ -809,16 +812,16 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	/* hdmi connector */
 	kms->hdmi->kms = kms;
 
-	ret = kms_connector_id_get(kms->kms_fd, kms->hdmi,
+	ret = kms_connector_id_get(kms->hdmi,
 				   DRM_MODE_CONNECTOR_HDMIA);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(kms->kms_fd, kms->hdmi);
+	ret = kms_connection_check(kms->hdmi);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_id_get(kms->kms_fd, kms->hdmi);
+	ret = kms_crtc_id_get(kms->hdmi);
 	if (ret)
 		return ret;
 
