@@ -684,6 +684,43 @@ kms_plane_projector_set(struct kms_display *display, struct buffer *buffer,
 }
 
 /*
+ * HDMI or VGA used for the projector.
+ */
+static int
+kms_projector_init(struct kms *kms, struct kms_display *display)
+{
+	int ret;
+
+	display->kms = kms;
+
+	ret = kms_connector_id_get(display, DRM_MODE_CONNECTOR_HDMIA);
+	if (ret)
+		return ret;
+
+	ret = kms_connection_check(display);
+	if (ret)
+		return ret;
+
+	ret = kms_crtc_id_get(display);
+	if (ret)
+		return ret;
+
+	display->capture->plane_id =
+		kms_plane_id_get(display, kms->format);
+	if (!display->capture->plane_id)
+		return -ENODEV;
+
+	display->capture->kms = kms;
+	ret = kms_plane_properties_get(display->capture);
+	if (ret)
+		return ret;
+
+	kms_layout_show(display, "Projector");
+
+	return 0;
+}
+
+/*
  * Show input buffer on the status lcd, in the top right corner.
  */
 static void
@@ -734,6 +771,42 @@ kms_plane_status_set(struct kms_display *display, struct buffer *buffer,
 				 buffer->fb_id);
 }
 
+/*
+ * Status LCD.
+ */
+static int
+kms_status_init(struct kms *kms, struct kms_display *display)
+{
+	int ret;
+
+	display->kms = kms;
+
+	ret = kms_connector_id_get(display, DRM_MODE_CONNECTOR_DPI);
+	if (ret)
+		return ret;
+
+	ret = kms_connection_check(display);
+	if (ret)
+		return ret;
+
+	ret = kms_crtc_id_get(display);
+	if (ret)
+		return ret;
+
+	display->capture->plane_id = kms_plane_id_get(display, kms->format);
+	if (!display->capture->plane_id)
+		return -ENODEV;
+
+	display->capture->kms = kms;
+	ret = kms_plane_properties_get(display->capture);
+	if (ret)
+		return ret;
+
+	kms_layout_show(display, "Status");
+
+	return 0;
+}
+
 static int
 kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 {
@@ -782,61 +855,13 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	/* LCD used as status display */
-	kms->status->kms = kms;
-
-	ret = kms_connector_id_get(kms->status,
-				   DRM_MODE_CONNECTOR_DPI);
+	ret = kms_status_init(kms, kms->status);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(kms->status);
+	ret = kms_projector_init(kms, kms->projector);
 	if (ret)
 		return ret;
-
-	ret = kms_crtc_id_get(kms->status);
-	if (ret)
-		return ret;
-
-	kms->status->capture->plane_id =
-		kms_plane_id_get(kms->status, kms->format);
-	if (!kms->status->capture->plane_id)
-		return -ENODEV;
-
-	kms->status->capture->kms = kms;
-	ret = kms_plane_properties_get(kms->status->capture);
-	if (ret)
-		return ret;
-
-	kms_layout_show(kms->status, "Status");
-
-	/* HDMI or VGA used for the projector */
-	kms->projector->kms = kms;
-
-	ret = kms_connector_id_get(kms->projector,
-				   DRM_MODE_CONNECTOR_HDMIA);
-	if (ret)
-		return ret;
-
-	ret = kms_connection_check(kms->projector);
-	if (ret)
-		return ret;
-
-	ret = kms_crtc_id_get(kms->projector);
-	if (ret)
-		return ret;
-
-	kms->projector->capture->plane_id =
-		kms_plane_id_get(kms->projector, kms->format);
-	if (!kms->projector->capture->plane_id)
-		return -ENODEV;
-
-	kms->projector->capture->kms = kms;
-	ret = kms_plane_properties_get(kms->projector->capture);
-	if (ret)
-		return ret;
-
-	kms_layout_show(kms->projector, "Projector");
 
 	ret = kms_buffer_get(kms->kms_fd, kms->buffers[0],
 			     kms->width, kms->height, kms->format);
