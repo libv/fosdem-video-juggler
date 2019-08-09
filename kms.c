@@ -96,6 +96,9 @@ struct kms_status {
 
 	struct kms_plane text[1];
 	struct buffer text_buffer[1];
+
+	struct kms_plane logo[1];
+	struct buffer logo_buffer[1];
 };
 
 struct kms_projector {
@@ -962,9 +965,63 @@ kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
 }
 
 /*
+ * Show logo on the top right of status lcd.
+ */
+static void
+kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
+{
+	struct kms_display *display = status->display;
+	struct kms_plane *plane = status->logo;
+	struct buffer *buffer = status->logo_buffer;
+
+	if (!plane->active) {
+		int x, y, w, h;
+
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_id,
+					 display->crtc_id);
+
+		/* top right, with a bit of space remaining */
+		x = display->crtc_width - 8 - buffer->width;
+		y = 8;
+		w = buffer->width;
+		h = buffer->height;
+
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_x, x);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_y, y);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_w, w);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_h, h);
+
+		/* read in full size image */
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_src_x, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_src_y, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_src_w,
+					 buffer->width << 16);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_src_h,
+					 buffer->height << 16);
+
+		plane->active = true;
+	}
+
+	/* actual flip. */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_fb_id,
+				 buffer->fb_id);
+}
+
+/*
  * Status LCD.
  */
 #include "fosdem_status_text.c"
+#include "fosdem_logo.c"
 
 static int
 kms_status_init(struct kms *kms)
@@ -973,6 +1030,7 @@ kms_status_init(struct kms *kms)
 	struct kms_display *display = status->display;
 	struct kms_plane *capture = status->capture;
 	struct kms_plane *text = status->text;
+	struct kms_plane *logo = status->logo;
 	int ret;
 
 	status->kms = kms;
@@ -1018,8 +1076,27 @@ kms_status_init(struct kms *kms)
 	if (ret)
 		return ret;
 
-	memcpy(status->text_buffer->planes[0].map, status_text,
+	memcpy(status->text_buffer->planes[0].map, status_text_bitmap,
 	       status->text_buffer->planes[0].size);
+
+	logo->kms = kms;
+	logo->plane_id = kms_plane_id_get(display, LOGO_FORMAT, 2);
+	if (!logo->plane_id)
+		return -ENODEV;
+
+	ret = kms_plane_properties_get(logo);
+	if (ret)
+		return ret;
+
+	kms_layout_show(display, logo, "Status:Logo");
+
+	ret = kms_buffer_argb8888_get(kms->kms_fd, status->logo_buffer,
+				      LOGO_WIDTH, LOGO_HEIGHT, LOGO_FORMAT);
+	if (ret)
+		return ret;
+
+	memcpy(status->logo_buffer->planes[0].map, logo_bitmap,
+	       status->logo_buffer->planes[0].size);
 
 	return 0;
 }
@@ -1034,6 +1111,7 @@ kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 
 	kms_status_capture_set(kms->status, buffer, request);
 	kms_status_text_set(kms->status, request);
+	kms_status_logo_set(kms->status, request);
 
 	kms_projector_capture_set(kms->projector, buffer, request);
 
