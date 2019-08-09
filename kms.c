@@ -25,12 +25,16 @@
 #include <time.h>
 #include <inttypes.h>
 
+#include <pthread.h>
+
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
 
 #include "juggler.h"
 #include "kms.h"
+
+pthread_t kms_thread[1];
 
 struct kms;
 
@@ -117,6 +121,8 @@ struct kms {
 	int height;
 	int bpp;
 	uint32_t format;
+
+	unsigned long count;
 
 	/* actual buffers */
 	int buffer_count;
@@ -1165,49 +1171,48 @@ kms_buffers_test_create(struct kms *kms)
 	return 0;
 }
 
-static int
-kms_buffers_test_show(struct kms *kms, unsigned long count)
+static void *
+kms_thread_handler(void *arg)
 {
+	struct kms *kms = (struct kms *) arg;
 	int ret, i;
 
-	for (i = 0; i < count;) {
+	for (i = 0; i < kms->count;) {
 		ret = kms_buffer_show(kms, kms->buffers[0], i);
 		if (ret)
-			return ret;
+			return NULL;
 		i++;
-
-		//sleep(1);
 
 		ret = kms_buffer_show(kms, kms->buffers[1], i);
 		if (ret)
-			return ret;
+			return NULL;
 		i++;
-
-		//sleep(1);
 
 		ret = kms_buffer_show(kms, kms->buffers[2], i);
 		if (ret)
-			return ret;
+			return NULL;
 		i++;
-
-		//sleep(1);
 	}
 
 	printf("\n");
 
-	return 0;
+	return NULL;
 }
 
 int
 kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 {
-	struct kms kms[1] = {{ 0 }};
+	struct kms *kms;
 	int ret;
+
+	kms = calloc(1, sizeof(struct kms));
 
 	kms->width = width;
 	kms->height = height;
 	kms->bpp = bpp;
 	kms->format = format;
+
+	kms->count = count;
 
 	ret = kms_fd_init(kms, "sun4i-drm");
 	if (ret)
@@ -1229,9 +1234,13 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	ret = kms_buffers_test_show(kms, count);
-	if (ret)
+	ret = pthread_create(kms_thread, NULL, kms_thread_handler,
+			     (void *) kms);
+	if (ret) {
+		fprintf(stderr, "%s() thread creation failed: %s\n",
+			__func__, strerror(ret));
 		return ret;
+	}
 
 	return 0;
 }
