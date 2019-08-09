@@ -70,6 +70,8 @@ struct kms_plane {
 	uint32_t plane_property_src_w;
 	uint32_t plane_property_src_h;
 	uint32_t plane_property_src_formats;
+	uint32_t plane_property_alpha;
+	uint32_t plane_property_zpos;
 };
 
 struct kms_display {
@@ -523,8 +525,12 @@ kms_plane_properties_get(struct kms_plane *plane)
 			plane->plane_property_src_w = property->prop_id;
 		else if (!strcmp(property->name, "SRC_H"))
 			plane->plane_property_src_h = property->prop_id;
-		//		else if (!strcmp(property->name, "IN_FORMATS"))
-		//	plane->plane_property_src_formats = property->prop_id;
+		else if (!strcmp(property->name, "IN_FORMATS"))
+			plane->plane_property_src_formats = property->prop_id;
+		else if (!strcmp(property->name, "alpha"))
+			plane->plane_property_alpha = property->prop_id;
+		else if (!strcmp(property->name, "zpos"))
+			plane->plane_property_zpos = property->prop_id;
 		else
 			printf("Unhandled property: %s\n", property->name);
 
@@ -754,11 +760,38 @@ kms_plane_status_set(struct kms_status *status, struct buffer *buffer,
 					 plane->plane_property_crtc_id,
 					 display->crtc_id);
 
+#if 0
 		/* top right corner */
 		x = display->crtc_width / 2;
 		y = 0;
 		w = display->crtc_width / 2;
 		h = buffer->height * w / buffer->width;
+#else
+				/* Scale, with borders, and center */
+		if ((buffer->width == display->crtc_width) &&
+		    (buffer->height == display->crtc_height)) {
+			x = 0;
+			y = 0;
+			w = display->crtc_width;
+			h = display->crtc_height;
+		} else {
+			/* first, try to fit horizontally. */
+			w = display->crtc_width;
+			h = buffer->height * display->crtc_width /
+				buffer->width;
+
+			/* if height does not fit, inverse the logic */
+			if (h > display->crtc_height) {
+				h = display->crtc_height;
+				w = buffer->width * display->crtc_height /
+					buffer->height;
+			}
+
+			/* center */
+			x = (display->crtc_width - w) / 2;
+			y = (display->crtc_height -h) / 2;
+		}
+#endif
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->plane_property_crtc_x, x);
@@ -780,6 +813,10 @@ kms_plane_status_set(struct kms_status *status, struct buffer *buffer,
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->plane_property_src_h,
 					 buffer->height << 16);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_alpha,
+					 0x6000);
+		//0xFFFF);
 		plane->active = true;
 	}
 
