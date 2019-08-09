@@ -32,6 +32,8 @@
 #include "juggler.h"
 #include "kms.h"
 
+struct kms;
+
 struct buffer {
 	int width;
 	int height;
@@ -50,18 +52,11 @@ struct buffer {
 	uint32_t fb_id;
 };
 
-struct kms_display {
-	bool connected;
-	bool mode_ok;
-	bool active;
-
-	uint32_t connector_id;
-	uint32_t encoder_id;
-	uint32_t crtc_id;
-	int crtc_width;
-	int crtc_height;
+struct kms_plane {
+	struct kms *kms;
 
 	uint32_t plane_id;
+	bool active;
 
 	/* property ids -- how clunky is this? */
 	uint32_t plane_property_crtc_id;
@@ -75,6 +70,21 @@ struct kms_display {
 	uint32_t plane_property_src_w;
 	uint32_t plane_property_src_h;
 	uint32_t plane_property_src_formats;
+};
+
+struct kms_display {
+	struct kms *kms;
+
+	bool connected;
+	bool mode_ok;
+
+	uint32_t connector_id;
+	uint32_t encoder_id;
+	uint32_t crtc_id;
+	int crtc_width;
+	int crtc_height;
+
+	struct kms_plane capture[1];
 };
 
 struct kms {
@@ -380,9 +390,9 @@ kms_crtc_id_get(int kms_fd, struct kms_display *display)
  * Todo, make sure that we use a plane only once.
  */
 static int
-kms_plane_id_get(struct kms *kms, struct kms_display *display,
-		 uint32_t format)
+kms_plane_id_get(struct kms_display *display, uint32_t format)
 {
+	struct kms *kms = display->kms;
 	drmModePlaneRes *resources_plane = NULL;
 	drmModePlane *plane;
 	uint32_t plane_id = 0;
@@ -395,7 +405,7 @@ kms_plane_id_get(struct kms *kms, struct kms_display *display,
 	if (!resources_plane) {
 		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
 			__func__);
-		ret = -EINVAL;
+		ret = 0;
 		goto error;
 	}
 
@@ -407,7 +417,7 @@ kms_plane_id_get(struct kms *kms, struct kms_display *display,
 		if (!plane) {
 			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
 				__func__, plane_id, strerror(errno));
-			ret = -errno;
+			ret = 0;
 			goto error;
 		}
 
@@ -432,12 +442,11 @@ kms_plane_id_get(struct kms *kms, struct kms_display *display,
 	if (i == (int) resources_plane->count_planes) {
 		fprintf(stderr, "%s: failed to get a Plane for our needs.\n",
 			__func__);
-		ret = -ENODEV;
+		ret = 0;
 		goto error;
 	}
 
-	display->plane_id = plane_id;
-	ret = 0;
+	ret = plane_id;
 
  error:
 	drmModeFreePlaneResources(resources_plane);
@@ -445,20 +454,21 @@ kms_plane_id_get(struct kms *kms, struct kms_display *display,
 }
 
 static int
-kms_plane_properties_get(int kms_fd, struct kms_display *display)
+kms_plane_properties_get(struct kms_plane *plane)
 {
 	drmModeObjectProperties *properties;
 	int i;
 
 	/* now that we have our plane, get the relevant property ids */
-	properties = drmModeObjectGetProperties(kms_fd, display->plane_id,
+	properties = drmModeObjectGetProperties(plane->kms->kms_fd,
+						plane->plane_id,
 						DRM_MODE_OBJECT_PLANE);
 	if (!properties) {
 		/* yes, no properties returns EINVAL */
 		if (errno != EINVAL) {
 			fprintf(stderr,
 				"Failed to get object %u properties: %s\n",
-				display->plane_id, strerror(errno));
+				plane->plane_id, strerror(errno));
 			return -errno;
 		}
 		return 0;
@@ -467,36 +477,37 @@ kms_plane_properties_get(int kms_fd, struct kms_display *display)
 	for (i = 0; i < (int) properties->count_props; i++) {
 		drmModePropertyRes *property;
 
-		property = drmModeGetProperty(kms_fd, properties->props[i]);
+		property = drmModeGetProperty(plane->kms->kms_fd,
+					      properties->props[i]);
 		if (!property) {
 			fprintf(stderr, "Failed to get object %u "
-				"property %u: %s\n", display->plane_id,
+				"property %u: %s\n", plane->plane_id,
 				properties->props[i], strerror(errno));
 			continue;
 		}
 
 		if (!strcmp(property->name, "CRTC_ID"))
-			display->plane_property_crtc_id = property->prop_id;
+			plane->plane_property_crtc_id = property->prop_id;
 		else if (!strcmp(property->name, "FB_ID"))
-			display->plane_property_fb_id = property->prop_id;
+			plane->plane_property_fb_id = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_X"))
-			display->plane_property_crtc_x = property->prop_id;
+			plane->plane_property_crtc_x = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_Y"))
-			display->plane_property_crtc_y = property->prop_id;
+			plane->plane_property_crtc_y = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_W"))
-			display->plane_property_crtc_w = property->prop_id;
+			plane->plane_property_crtc_w = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_H"))
-			display->plane_property_crtc_h = property->prop_id;
+			plane->plane_property_crtc_h = property->prop_id;
 		else if (!strcmp(property->name, "SRC_X"))
-			display->plane_property_src_x = property->prop_id;
+			plane->plane_property_src_x = property->prop_id;
 		else if (!strcmp(property->name, "SRC_Y"))
-			display->plane_property_src_y = property->prop_id;
+			plane->plane_property_src_y = property->prop_id;
 		else if (!strcmp(property->name, "SRC_W"))
-			display->plane_property_src_w = property->prop_id;
+			plane->plane_property_src_w = property->prop_id;
 		else if (!strcmp(property->name, "SRC_H"))
-			display->plane_property_src_h = property->prop_id;
+			plane->plane_property_src_h = property->prop_id;
 		//		else if (!strcmp(property->name, "IN_FORMATS"))
-		//	display->plane_property_src_formats = property->prop_id;
+		//	plane->plane_property_src_formats = property->prop_id;
 		else
 			printf("Unhandled property: %s\n", property->name);
 
@@ -511,11 +522,13 @@ kms_plane_properties_get(int kms_fd, struct kms_display *display)
 static void
 kms_layout_show(struct kms_display *display, const char *name)
 {
+	struct kms_plane *plane = display->capture;
+
 	printf("%s: %s, mode: %s\n", name,
 	       display->connected ? "connected" : "disconnected",
 	       display->mode_ok ? "set" : "disabled");
 	printf("\tFB -> Plane(0x%02X) -> CRTC(0x%02X) -> Encoder(0x%02X) ->"
-	       " Connector(0x%02X);\n", display->plane_id,
+	       " Connector(0x%02X);\n", plane->plane_id,
 	       display->crtc_id, display->encoder_id, display->connector_id);
 }
 
@@ -604,12 +617,13 @@ static void
 kms_plane_hdmi_set(struct kms_display *display, struct buffer *buffer,
 		   drmModeAtomicReqPtr request)
 {
+	struct kms_plane *plane = display->capture;
 
-	if (!display->active) {
+	if (!plane->active) {
 		int x, y, w, h;
 
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_id,
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_id,
 					 display->crtc_id);
 
 		/* Scale, with borders, and center */
@@ -637,32 +651,32 @@ kms_plane_hdmi_set(struct kms_display *display, struct buffer *buffer,
 			y = (display->crtc_height -h) / 2;
 		}
 
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_x, x);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_y, y);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_w, w);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_h, h);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_x, x);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_y, y);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_w, w);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_h, h);
 
 		/* read in full size image */
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_src_x, 0);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_src_y, 0);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_src_w,
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_x, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_y, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_w,
 					 buffer->width << 16);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_src_h,
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_h,
 					 buffer->height << 16);
-		display->active = true;
+		plane->active = true;
 	}
 
 	/* actual flip. */
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_fb_id,
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->plane_property_fb_id,
 				 buffer->fb_id);
 }
 
@@ -673,12 +687,13 @@ static void
 kms_plane_lcd_set(struct kms_display *display, struct buffer *buffer,
 		   drmModeAtomicReqPtr request)
 {
+	struct kms_plane *plane = display->capture;
 
-	if (!display->active) {
+	if (!plane->active) {
 		int x, y, w, h;
 
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_id,
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_id,
 					 display->crtc_id);
 
 		/* top right corner */
@@ -687,32 +702,32 @@ kms_plane_lcd_set(struct kms_display *display, struct buffer *buffer,
 		w = display->crtc_width / 2;
 		h = buffer->height * w / buffer->width;
 
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_x, x);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_y, y);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_w, w);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_crtc_h, h);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_x, x);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_y, y);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_w, w);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_h, h);
 
 		/* read in full size image */
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_src_x, 0);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_src_y, 0);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_src_w,
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_x, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_y, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_w,
 					 buffer->width << 16);
-		drmModeAtomicAddProperty(request, display->plane_id,
-					 display->plane_property_src_h,
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_h,
 					 buffer->height << 16);
-		display->active = true;
+		plane->active = true;
 	}
 
 	/* actual flip. */
-	drmModeAtomicAddProperty(request, display->plane_id,
-				 display->plane_property_fb_id,
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->plane_property_fb_id,
 				 buffer->fb_id);
 }
 
@@ -765,6 +780,8 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 		return ret;
 
 	/* LCD connector */
+	kms->lcd->kms = kms;
+
 	ret = kms_connector_id_get(kms->kms_fd, kms->lcd,
 				   DRM_MODE_CONNECTOR_DPI);
 	if (ret)
@@ -778,17 +795,20 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	ret = kms_plane_id_get(kms, kms->lcd, kms->format);
-	if (ret)
-		return ret;
+	kms->lcd->capture->plane_id = kms_plane_id_get(kms->lcd, kms->format);
+	if (!kms->lcd->capture->plane_id)
+		return -ENODEV;
 
-	ret = kms_plane_properties_get(kms->kms_fd, kms->lcd);
+	kms->lcd->capture->kms = kms;
+	ret = kms_plane_properties_get(kms->lcd->capture);
 	if (ret)
 		return ret;
 
 	kms_layout_show(kms->lcd, "LCD");
 
 	/* hdmi connector */
+	kms->hdmi->kms = kms;
+
 	ret = kms_connector_id_get(kms->kms_fd, kms->hdmi,
 				   DRM_MODE_CONNECTOR_HDMIA);
 	if (ret)
@@ -802,11 +822,12 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	ret = kms_plane_id_get(kms, kms->hdmi, kms->format);
-	if (ret)
-		return ret;
+	kms->hdmi->capture->plane_id = kms_plane_id_get(kms->hdmi, kms->format);
+	if (!kms->hdmi->capture->plane_id)
+		return -ENODEV;
 
-	ret = kms_plane_properties_get(kms->kms_fd, kms->hdmi);
+	kms->hdmi->capture->kms = kms;
+	ret = kms_plane_properties_get(kms->hdmi->capture);
 	if (ret)
 		return ret;
 
