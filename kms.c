@@ -59,19 +59,19 @@ struct kms_plane {
 	bool active;
 
 	/* property ids -- how clunky is this? */
-	uint32_t plane_property_crtc_id;
-	uint32_t plane_property_fb_id;
-	uint32_t plane_property_crtc_x;
-	uint32_t plane_property_crtc_y;
-	uint32_t plane_property_crtc_w;
-	uint32_t plane_property_crtc_h;
-	uint32_t plane_property_src_x;
-	uint32_t plane_property_src_y;
-	uint32_t plane_property_src_w;
-	uint32_t plane_property_src_h;
-	uint32_t plane_property_src_formats;
-	uint32_t plane_property_alpha;
-	uint32_t plane_property_zpos;
+	uint32_t property_crtc_id;
+	uint32_t property_fb_id;
+	uint32_t property_crtc_x;
+	uint32_t property_crtc_y;
+	uint32_t property_crtc_w;
+	uint32_t property_crtc_h;
+	uint32_t property_src_x;
+	uint32_t property_src_y;
+	uint32_t property_src_w;
+	uint32_t property_src_h;
+	uint32_t property_src_formats;
+	uint32_t property_alpha;
+	uint32_t property_zpos;
 };
 
 struct kms_display {
@@ -514,31 +514,31 @@ kms_plane_properties_get(struct kms_plane *plane)
 		}
 
 		if (!strcmp(property->name, "CRTC_ID"))
-			plane->plane_property_crtc_id = property->prop_id;
+			plane->property_crtc_id = property->prop_id;
 		else if (!strcmp(property->name, "FB_ID"))
-			plane->plane_property_fb_id = property->prop_id;
+			plane->property_fb_id = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_X"))
-			plane->plane_property_crtc_x = property->prop_id;
+			plane->property_crtc_x = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_Y"))
-			plane->plane_property_crtc_y = property->prop_id;
+			plane->property_crtc_y = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_W"))
-			plane->plane_property_crtc_w = property->prop_id;
+			plane->property_crtc_w = property->prop_id;
 		else if (!strcmp(property->name, "CRTC_H"))
-			plane->plane_property_crtc_h = property->prop_id;
+			plane->property_crtc_h = property->prop_id;
 		else if (!strcmp(property->name, "SRC_X"))
-			plane->plane_property_src_x = property->prop_id;
+			plane->property_src_x = property->prop_id;
 		else if (!strcmp(property->name, "SRC_Y"))
-			plane->plane_property_src_y = property->prop_id;
+			plane->property_src_y = property->prop_id;
 		else if (!strcmp(property->name, "SRC_W"))
-			plane->plane_property_src_w = property->prop_id;
+			plane->property_src_w = property->prop_id;
 		else if (!strcmp(property->name, "SRC_H"))
-			plane->plane_property_src_h = property->prop_id;
+			plane->property_src_h = property->prop_id;
 		else if (!strcmp(property->name, "IN_FORMATS"))
-			plane->plane_property_src_formats = property->prop_id;
+			plane->property_src_formats = property->prop_id;
 		else if (!strcmp(property->name, "alpha"))
-			plane->plane_property_alpha = property->prop_id;
+			plane->property_alpha = property->prop_id;
 		else if (!strcmp(property->name, "zpos"))
-			plane->plane_property_zpos = property->prop_id;
+			plane->property_zpos = property->prop_id;
 		else
 			printf("Unhandled property: %s\n", property->name);
 
@@ -728,7 +728,7 @@ kms_projector_capture_set(struct kms_projector *projector,
 		int x, y, w, h;
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_id,
+					 plane->property_crtc_id,
 					 display->crtc_id);
 
 		/* Scale, with borders, and center */
@@ -757,31 +757,31 @@ kms_projector_capture_set(struct kms_projector *projector,
 		}
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_x, x);
+					 plane->property_crtc_x, x);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_y, y);
+					 plane->property_crtc_y, y);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_w, w);
+					 plane->property_crtc_w, w);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_h, h);
+					 plane->property_crtc_h, h);
 
 		/* read in full size image */
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_x, 0);
+					 plane->property_src_x, 0);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_y, 0);
+					 plane->property_src_y, 0);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_w,
+					 plane->property_src_w,
 					 buffer->width << 16);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_h,
+					 plane->property_src_h,
 					 buffer->height << 16);
 		plane->active = true;
 	}
 
 	/* actual flip. */
 	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->plane_property_fb_id,
+				 plane->property_fb_id,
 				 buffer->fb_id);
 }
 
@@ -839,7 +839,7 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 		int x, y, w, h;
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_id,
+					 plane->property_crtc_id,
 					 display->crtc_id);
 
 #if 0
@@ -876,27 +876,27 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 #endif
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_x, x);
+					 plane->property_crtc_x, x);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_y, y);
+					 plane->property_crtc_y, y);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_w, w);
+					 plane->property_crtc_w, w);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_h, h);
+					 plane->property_crtc_h, h);
 
 		/* read in full size image */
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_x, 0);
+					 plane->property_src_x, 0);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_y, 0);
+					 plane->property_src_y, 0);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_w,
+					 plane->property_src_w,
 					 buffer->width << 16);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_h,
+					 plane->property_src_h,
 					 buffer->height << 16);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_alpha,
+					 plane->property_alpha,
 					 0x6000);
 		//0xFFFF);
 		plane->active = true;
@@ -904,7 +904,7 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 
 	/* actual flip. */
 	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->plane_property_fb_id,
+				 plane->property_fb_id,
 				 buffer->fb_id);
 }
 
@@ -922,7 +922,7 @@ kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
 		int x, y, w, h;
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_id,
+					 plane->property_crtc_id,
 					 display->crtc_id);
 
 		/* bottom, with a bit of space remaining */
@@ -932,24 +932,24 @@ kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
 		h = buffer->height;
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_x, x);
+					 plane->property_crtc_x, x);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_y, y);
+					 plane->property_crtc_y, y);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_w, w);
+					 plane->property_crtc_w, w);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_crtc_h, h);
+					 plane->property_crtc_h, h);
 
 		/* read in full size image */
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_x, 0);
+					 plane->property_src_x, 0);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_y, 0);
+					 plane->property_src_y, 0);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_w,
+					 plane->property_src_w,
 					 buffer->width << 16);
 		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->plane_property_src_h,
+					 plane->property_src_h,
 					 buffer->height << 16);
 
 		plane->active = true;
@@ -957,7 +957,7 @@ kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
 
 	/* actual flip. */
 	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->plane_property_fb_id,
+				 plane->property_fb_id,
 				 buffer->fb_id);
 }
 
