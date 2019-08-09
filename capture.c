@@ -24,6 +24,7 @@
 #include <string.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <inttypes.h>
@@ -146,7 +147,7 @@ static int
 v4l2_buffers_alloc(void)
 {
 	struct v4l2_requestbuffers request[1] = {{
-			.count = 32,
+			.count = 16,
 			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
 			.memory = V4L2_MEMORY_MMAP,
 		}};
