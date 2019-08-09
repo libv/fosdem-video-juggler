@@ -39,7 +39,7 @@ struct buffer {
 	int height;
 	uint32_t format;
 
-	struct plane {
+	struct buffer_plane {
 		uint32_t handle; /* dumb buffer handle */
 
 		int pitch;
@@ -93,6 +93,9 @@ struct kms_status {
 	struct kms_display display[1];
 
 	struct kms_plane capture[1];
+
+	struct kms_plane text[1];
+	struct buffer text_buffer[1];
 };
 
 struct kms_projector {
@@ -409,13 +412,13 @@ kms_crtc_id_get(struct kms_display *display)
  * Todo, make sure that we use a plane only once.
  */
 static int
-kms_plane_id_get(struct kms_display *display, uint32_t format)
+kms_plane_id_get(struct kms_display *display, uint32_t format, int index)
 {
 	struct kms *kms = display->kms;
 	drmModePlaneRes *resources_plane = NULL;
 	drmModePlane *plane;
 	uint32_t plane_id = 0;
-	int i, j, ret, crtc_index;
+	int i, j, ret, crtc_index, count = 0;
 
 	crtc_index = kms_crtc_index_get(kms, display->crtc_id);
 
@@ -449,6 +452,11 @@ kms_plane_id_get(struct kms_display *display, uint32_t format)
 
 		if (j == (int) plane->count_formats)
 			goto plane_next;
+
+		if (count != index) {
+			count++;
+			goto plane_next;
+		}
 
 		drmModeFreePlane(plane);
 		break;
@@ -555,8 +563,8 @@ kms_layout_show(struct kms_display *display, struct kms_plane *plane,
 }
 
 static int
-kms_buffer_get(int kms_fd, struct buffer *buffer,
-	       int width, int height, uint32_t format)
+kms_buffer_planar_get(int kms_fd, struct buffer *buffer,
+		      int width, int height, uint32_t format)
 {
 	uint32_t handles[4] = { 0 };
 	uint32_t pitches[4] = { 0 };
@@ -570,7 +578,7 @@ kms_buffer_get(int kms_fd, struct buffer *buffer,
 	for (i = 0; i < 3; i++) {
 		struct drm_mode_create_dumb buffer_create = { 0 };
 		struct drm_mode_map_dumb buffer_map = { 0 };
-		struct plane *plane = &buffer->planes[i];
+		struct buffer_plane *plane = &buffer->planes[i];
 
 		buffer_create.width = width;
 		buffer_create.height = height;
@@ -632,12 +640,86 @@ kms_buffer_get(int kms_fd, struct buffer *buffer,
 	return 0;
 }
 
+static int
+kms_buffer_argb8888_get(int kms_fd, struct buffer *buffer,
+			int width, int height, uint32_t format)
+{
+	struct drm_mode_create_dumb buffer_create = { 0 };
+	struct drm_mode_map_dumb buffer_map = { 0 };
+	struct buffer_plane *plane = &buffer->planes[0];
+	uint32_t handles[4] = { 0 };
+	uint32_t pitches[4] = { 0 };
+	uint32_t offsets[4] = { 0 };
+	int ret;
+
+	buffer->width = width;
+	buffer->height = height;
+	buffer->format = format;
+
+	buffer_create.width = width;
+	buffer_create.height = height;
+	buffer_create.bpp = 32;
+	ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_CREATE_DUMB, &buffer_create);
+	if (ret) {
+		fprintf(stderr, "%s: failed to create buffer: %s\n",
+			__func__, strerror(errno));
+		return ret;
+	}
+
+	plane->handle = buffer_create.handle;
+	plane->size = buffer_create.size;
+	plane->pitch = buffer_create.pitch;
+	printf("buffer_plane: Created buffer %dx%d@%dbpp: "
+	       "%02u (%tdbytes)\n", buffer->width, buffer->height,
+	       buffer_create.bpp, plane->handle, plane->size);
+
+	buffer_map.handle = plane->handle;
+	ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer_map);
+	if (ret) {
+		fprintf(stderr, "%s: failed to map buffer: %s\n",
+			__func__, strerror(errno));
+		return -errno;
+	}
+
+	plane->map_offset = buffer_map.offset;
+	printf("buffer_plane: Mapped buffer %02u at offset 0x%jX\n",
+	       plane->handle, plane->map_offset);
+
+	plane->map = mmap(0, plane->size, PROT_READ | PROT_WRITE,
+			  MAP_SHARED, kms_fd, plane->map_offset);
+	if (plane->map == MAP_FAILED) {
+		fprintf(stderr, "%s: failed to mmap buffer: %s\n",
+			__func__, strerror(errno));
+		return -errno;
+	}
+
+	printf("buffer_plane: MMapped buffer %02u to %p\n",
+	       plane->handle, plane->map);
+
+	handles[0] = plane->handle;
+	pitches[0] = plane->pitch;
+
+	ret = drmModeAddFB2(kms_fd, buffer->width, buffer->height,
+			    buffer->format, handles, pitches, offsets,
+			    &buffer->fb_id, 0);
+	if (ret) {
+		fprintf(stderr, "%s: failed to create fb: %s\n",
+			__func__, strerror(errno));
+		return -errno;
+	}
+
+	printf("Created FB %02u.\n", buffer->fb_id);
+
+	return 0;
+}
+
 /*
  * Show input buffer on projector, scaled, with borders.
  */
 static void
-kms_plane_projector_set(struct kms_projector *projector, struct buffer *buffer,
-			drmModeAtomicReqPtr request)
+kms_projector_capture_set(struct kms_projector *projector,
+			  struct buffer *buffer,
+			  drmModeAtomicReqPtr request)
 {
 	struct kms_display *display = projector->display;
 	struct kms_plane *plane = projector->capture;
@@ -730,7 +812,7 @@ kms_projector_init(struct kms *kms)
 		return ret;
 
 	plane->kms = kms;
-	plane->plane_id = kms_plane_id_get(display, kms->format);
+	plane->plane_id = kms_plane_id_get(display, kms->format, 0);
 	if (!plane->plane_id)
 		return -ENODEV;
 
@@ -747,8 +829,8 @@ kms_projector_init(struct kms *kms)
  * Show input buffer on the status lcd, in the top right corner.
  */
 static void
-kms_plane_status_set(struct kms_status *status, struct buffer *buffer,
-		     drmModeAtomicReqPtr request)
+kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
+		       drmModeAtomicReqPtr request)
 {
 	struct kms_display *display = status->display;
 	struct kms_plane *plane = status->capture;
@@ -827,14 +909,70 @@ kms_plane_status_set(struct kms_status *status, struct buffer *buffer,
 }
 
 /*
+ * Show status text on bottom of the status lcd.
+ */
+static void
+kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
+{
+	struct kms_display *display = status->display;
+	struct kms_plane *plane = status->text;
+	struct buffer *buffer = status->text_buffer;
+
+	if (!plane->active) {
+		int x, y, w, h;
+
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_id,
+					 display->crtc_id);
+
+		/* bottom, with a bit of space remaining */
+		x = 8;
+		y = display->crtc_height - 8 - buffer->height;
+		w = buffer->width;
+		h = buffer->height;
+
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_x, x);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_y, y);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_w, w);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_crtc_h, h);
+
+		/* read in full size image */
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_x, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_y, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_w,
+					 buffer->width << 16);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->plane_property_src_h,
+					 buffer->height << 16);
+
+		plane->active = true;
+	}
+
+	/* actual flip. */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->plane_property_fb_id,
+				 buffer->fb_id);
+}
+
+/*
  * Status LCD.
  */
+#include "fosdem_status_text.c"
+
 static int
 kms_status_init(struct kms *kms)
 {
 	struct kms_status *status = kms->status;
 	struct kms_display *display = status->display;
-	struct kms_plane *plane = status->capture;
+	struct kms_plane *capture = status->capture;
+	struct kms_plane *text = status->text;
 	int ret;
 
 	status->kms = kms;
@@ -852,16 +990,36 @@ kms_status_init(struct kms *kms)
 	if (ret)
 		return ret;
 
-	plane->kms = kms;
-	plane->plane_id = kms_plane_id_get(display, kms->format);
-	if (!plane->plane_id)
+	capture->kms = kms;
+	capture->plane_id = kms_plane_id_get(display, kms->format, 0);
+	if (!capture->plane_id)
 		return -ENODEV;
 
-	ret = kms_plane_properties_get(plane);
+	ret = kms_plane_properties_get(capture);
 	if (ret)
 		return ret;
 
-	kms_layout_show(display, plane, "Status");
+	kms_layout_show(display, capture, "Status:Capture");
+
+	text->kms = kms;
+	text->plane_id = kms_plane_id_get(display,  STATUS_TEXT_FORMAT, 1);
+	if (!text->plane_id)
+		return -ENODEV;
+
+	ret = kms_plane_properties_get(text);
+	if (ret)
+		return ret;
+
+	kms_layout_show(display, text, "Status:Text");
+
+	ret = kms_buffer_argb8888_get(kms->kms_fd, status->text_buffer,
+				      STATUS_TEXT_WIDTH, STATUS_TEXT_HEIGHT,
+				      STATUS_TEXT_FORMAT);
+	if (ret)
+		return ret;
+
+	memcpy(status->text_buffer->planes[0].map, status_text,
+	       status->text_buffer->planes[0].size);
 
 	return 0;
 }
@@ -874,8 +1032,10 @@ kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 
 	request = drmModeAtomicAlloc();
 
-	kms_plane_status_set(kms->status, buffer, request);
-	kms_plane_projector_set(kms->projector, buffer, request);
+	kms_status_capture_set(kms->status, buffer, request);
+	kms_status_text_set(kms->status, request);
+
+	kms_projector_capture_set(kms->projector, buffer, request);
 
 	ret = drmModeAtomicCommit(kms->kms_fd, request,
 				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
@@ -900,24 +1060,24 @@ kms_buffers_test_create(struct kms *kms)
 {
 	int ret;
 
-	ret = kms_buffer_get(kms->kms_fd, kms->buffers[0],
-			     kms->width, kms->height, kms->format);
+	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[0],
+				    kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
 
 	memset(kms->buffers[0]->planes[0].map, 0xFF,
 	       kms->buffers[0]->planes[0].size);
 
-	ret = kms_buffer_get(kms->kms_fd, kms->buffers[1],
-			     kms->width, kms->height, kms->format);
+	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[1],
+				    kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
 
 	memset(kms->buffers[1]->planes[1].map, 0xFF,
 	       kms->buffers[1]->planes[1].size);
 
-	ret = kms_buffer_get(kms->kms_fd, kms->buffers[2],
-			     kms->width, kms->height, kms->format);
+	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[2],
+				    kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
 

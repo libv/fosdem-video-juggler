@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
 
 	printf("Running for %lu frames.\n", count);
 
-	ret = kms_init(1024, 768, 24, DRM_FORMAT_R8_G8_B8, count);
+	ret = kms_init(1280, 720, 24, DRM_FORMAT_R8_G8_B8, count);
 	if (ret)
 		return ret;
 
