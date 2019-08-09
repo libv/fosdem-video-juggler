@@ -77,7 +77,7 @@ struct kms_display {
 	uint32_t plane_property_src_formats;
 };
 
-struct test {
+struct kms {
 	int kms_fd;
 
 	/* buffer info */
@@ -103,25 +103,25 @@ struct test {
 };
 
 static int
-kms_fd_init(struct test *test, const char *driver_name)
+kms_fd_init(struct kms *kms, const char *driver_name)
 {
 	int ret;
 
-	test->kms_fd = drmOpen(driver_name, NULL);
-	if (test->kms_fd == -1) {
+	kms->kms_fd = drmOpen(driver_name, NULL);
+	if (kms->kms_fd == -1) {
 		fprintf(stderr, "Error: Failed to open KMS driver %s: %s\n",
 			driver_name, strerror(errno));
 		return errno;
 	}
 
-	ret = drmSetClientCap(test->kms_fd, DRM_CLIENT_CAP_ATOMIC, 1);
+	ret = drmSetClientCap(kms->kms_fd, DRM_CLIENT_CAP_ATOMIC, 1);
 	if (ret < 0) {
 		fprintf(stderr, "Error: Unable to set DRM_CLIENT_CAP_ATOMIC:"
 			" %s\n", strerror(errno));
 		return ret;
 	}
 
-	ret = drmSetClientCap(test->kms_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+	ret = drmSetClientCap(kms->kms_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
 	if (ret < 0) {
 		fprintf(stderr, "Error: Unable to set "
 			"DRM_CLIENT_CAP_UNIVERSAL_PLANES: %s\n",
@@ -270,12 +270,12 @@ kms_connector_id_get(int kms_fd, struct kms_display *display, uint32_t type)
  * resources structure. WTF?
  */
 static int
-kms_crtc_indices_get(struct test *test)
+kms_crtc_indices_get(struct kms *kms)
 {
 	drmModeRes *resources;
 	int i;
 
-	resources = drmModeGetResources(test->kms_fd);
+	resources = drmModeGetResources(kms->kms_fd);
 	if (!resources) {
 		fprintf(stderr, "%s: Failed to get KMS resources: %s\n",
 			__func__, strerror(errno));
@@ -283,24 +283,24 @@ kms_crtc_indices_get(struct test *test)
 	}
 
 	if (resources->count_crtcs > CRTC_INDEX_COUNT_MAX)
-		test->crtc_index_count = CRTC_INDEX_COUNT_MAX;
+		kms->crtc_index_count = CRTC_INDEX_COUNT_MAX;
 	else
-		test->crtc_index_count = resources->count_crtcs;
+		kms->crtc_index_count = resources->count_crtcs;
 
-	for (i = 0; i < test->crtc_index_count; i++)
-		test->crtc_index[i] = resources->crtcs[i];
+	for (i = 0; i < kms->crtc_index_count; i++)
+		kms->crtc_index[i] = resources->crtcs[i];
 
 	drmModeFreeResources(resources);
 	return 0;
 }
 
 static int
-kms_crtc_index_get(struct test *test, uint32_t id)
+kms_crtc_index_get(struct kms *kms, uint32_t id)
 {
 	int i;
 
-	for (i = 0; i < test->crtc_index_count; i++)
-		if (test->crtc_index[i] == id)
+	for (i = 0; i < kms->crtc_index_count; i++)
+		if (kms->crtc_index[i] == id)
 			return i;
 
 	fprintf(stderr, "%s: failed to find crtc %u\n", __func__, id);
@@ -380,7 +380,7 @@ kms_crtc_id_get(int kms_fd, struct kms_display *display)
  * Todo, make sure that we use a plane only once.
  */
 static int
-kms_plane_id_get(struct test *test, struct kms_display *display,
+kms_plane_id_get(struct kms *kms, struct kms_display *display,
 		 uint32_t format)
 {
 	drmModePlaneRes *resources_plane = NULL;
@@ -388,10 +388,10 @@ kms_plane_id_get(struct test *test, struct kms_display *display,
 	uint32_t plane_id = 0;
 	int i, j, ret, crtc_index;
 
-	crtc_index = kms_crtc_index_get(test, display->crtc_id);
+	crtc_index = kms_crtc_index_get(kms, display->crtc_id);
 
 	/* Get plane resources so we can start sifting through the planes */
-	resources_plane = drmModeGetPlaneResources(test->kms_fd);
+	resources_plane = drmModeGetPlaneResources(kms->kms_fd);
 	if (!resources_plane) {
 		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
 			__func__);
@@ -403,7 +403,7 @@ kms_plane_id_get(struct test *test, struct kms_display *display,
 	for (i = 0; i < (int) resources_plane->count_planes; i++) {
 		plane_id = resources_plane->planes[i];
 
-		plane = drmModeGetPlane(test->kms_fd, plane_id);
+		plane = drmModeGetPlane(kms->kms_fd, plane_id);
 		if (!plane) {
 			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
 				__func__, plane_id, strerror(errno));
@@ -415,7 +415,7 @@ kms_plane_id_get(struct test *test, struct kms_display *display,
 			goto plane_next;
 
 		for (j = 0; j < (int) plane->count_formats; j++)
-			if (plane->formats[j] == test->format)
+			if (plane->formats[j] == kms->format)
 				break;
 
 		if (j == (int) plane->count_formats)
@@ -717,17 +717,17 @@ kms_plane_lcd_set(struct kms_display *display, struct buffer *buffer,
 }
 
 static int
-kms_buffer_show(struct test *test, struct buffer *buffer, int frame)
+kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 {
 	drmModeAtomicReqPtr request;
 	int ret;
 
 	request = drmModeAtomicAlloc();
 
-	kms_plane_lcd_set(test->lcd, buffer, request);
-	kms_plane_hdmi_set(test->hdmi, buffer, request);
+	kms_plane_lcd_set(kms->lcd, buffer, request);
+	kms_plane_hdmi_set(kms->hdmi, buffer, request);
 
-	ret = drmModeAtomicCommit(test->kms_fd, request,
+	ret = drmModeAtomicCommit(kms->kms_fd, request,
 				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
 
 	drmModeAtomicFree(request);
@@ -748,109 +748,109 @@ kms_buffer_show(struct test *test, struct buffer *buffer, int frame)
 int
 kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 {
-	struct test test[1] = {{ 0 }};
+	struct kms kms[1] = {{ 0 }};
 	int ret, i;
 
-	test->width = width;
-	test->height = height;
-	test->bpp = bpp;
-	test->format = format;
+	kms->width = width;
+	kms->height = height;
+	kms->bpp = bpp;
+	kms->format = format;
 
-	ret = kms_fd_init(test, "sun4i-drm");
+	ret = kms_fd_init(kms, "sun4i-drm");
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_indices_get(test);
+	ret = kms_crtc_indices_get(kms);
 	if (ret)
 		return ret;
 
 	/* LCD connector */
-	ret = kms_connector_id_get(test->kms_fd, test->lcd,
+	ret = kms_connector_id_get(kms->kms_fd, kms->lcd,
 				   DRM_MODE_CONNECTOR_DPI);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(test->kms_fd, test->lcd);
+	ret = kms_connection_check(kms->kms_fd, kms->lcd);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_id_get(test->kms_fd, test->lcd);
+	ret = kms_crtc_id_get(kms->kms_fd, kms->lcd);
 	if (ret)
 		return ret;
 
-	ret = kms_plane_id_get(test, test->lcd, test->format);
+	ret = kms_plane_id_get(kms, kms->lcd, kms->format);
 	if (ret)
 		return ret;
 
-	ret = kms_plane_properties_get(test->kms_fd, test->lcd);
+	ret = kms_plane_properties_get(kms->kms_fd, kms->lcd);
 	if (ret)
 		return ret;
 
-	kms_layout_show(test->lcd, "LCD");
+	kms_layout_show(kms->lcd, "LCD");
 
 	/* hdmi connector */
-	ret = kms_connector_id_get(test->kms_fd, test->hdmi,
+	ret = kms_connector_id_get(kms->kms_fd, kms->hdmi,
 				   DRM_MODE_CONNECTOR_HDMIA);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(test->kms_fd, test->hdmi);
+	ret = kms_connection_check(kms->kms_fd, kms->hdmi);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_id_get(test->kms_fd, test->hdmi);
+	ret = kms_crtc_id_get(kms->kms_fd, kms->hdmi);
 	if (ret)
 		return ret;
 
-	ret = kms_plane_id_get(test, test->hdmi, test->format);
+	ret = kms_plane_id_get(kms, kms->hdmi, kms->format);
 	if (ret)
 		return ret;
 
-	ret = kms_plane_properties_get(test->kms_fd, test->hdmi);
+	ret = kms_plane_properties_get(kms->kms_fd, kms->hdmi);
 	if (ret)
 		return ret;
 
-	kms_layout_show(test->hdmi, "HDMI");
+	kms_layout_show(kms->hdmi, "HDMI");
 
-	ret = kms_buffer_get(test->kms_fd, test->buffers[0],
-			     test->width, test->height, test->format);
+	ret = kms_buffer_get(kms->kms_fd, kms->buffers[0],
+			     kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
-	//buffer_prefill(test, test->buffers[0]);
-	memset(test->buffers[0]->planes[0].map, 0xFF,
-	       test->buffers[0]->planes[0].size);
+	//buffer_prefill(kms, kms->buffers[0]);
+	memset(kms->buffers[0]->planes[0].map, 0xFF,
+	       kms->buffers[0]->planes[0].size);
 
-	ret = kms_buffer_get(test->kms_fd, test->buffers[1],
-			     test->width, test->height, test->format);
+	ret = kms_buffer_get(kms->kms_fd, kms->buffers[1],
+			     kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
-	//buffer_prefill(test, test->buffers[1]);
-	memset(test->buffers[1]->planes[1].map, 0xFF,
-	       test->buffers[1]->planes[1].size);
+	//buffer_prefill(kms, kms->buffers[1]);
+	memset(kms->buffers[1]->planes[1].map, 0xFF,
+	       kms->buffers[1]->planes[1].size);
 
-	ret = kms_buffer_get(test->kms_fd, test->buffers[2],
-			     test->width, test->height, test->format);
+	ret = kms_buffer_get(kms->kms_fd, kms->buffers[2],
+			     kms->width, kms->height, kms->format);
 	if (ret)
 		return ret;
-	memset(test->buffers[2]->planes[2].map, 0xFF,
-	       test->buffers[2]->planes[2].size);
+	memset(kms->buffers[2]->planes[2].map, 0xFF,
+	       kms->buffers[2]->planes[2].size);
 
 	for (i = 0; i < count;) {
-		ret = kms_buffer_show(test, test->buffers[0], i);
+		ret = kms_buffer_show(kms, kms->buffers[0], i);
 		if (ret)
 			return ret;
 		i++;
 
 		//sleep(1);
 
-		ret = kms_buffer_show(test, test->buffers[1], i);
+		ret = kms_buffer_show(kms, kms->buffers[1], i);
 		if (ret)
 			return ret;
 		i++;
 
 		//sleep(1);
 
-		ret = kms_buffer_show(test, test->buffers[2], i);
+		ret = kms_buffer_show(kms, kms->buffers[2], i);
 		if (ret)
 			return ret;
 		i++;
