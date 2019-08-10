@@ -1130,10 +1130,13 @@ kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 		fprintf(stderr, "%s: failed to show fb %02u: %s\n",
 			__func__, buffer->fb_id, strerror(errno));
 		ret = -errno;
-	} else {
+	}
+#if 0
+	else {
 		printf("\rShowing fb %02u for frame %d", buffer->fb_id, frame);
 		fflush(stdout);
 	}
+#endif
 
 	return ret;
 
@@ -1194,7 +1197,7 @@ kms_thread_handler(void *arg)
 		i++;
 	}
 
-	printf("\n");
+	//printf("\n");
 
 	return NULL;
 }
