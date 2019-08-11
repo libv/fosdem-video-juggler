@@ -19,13 +19,12 @@
  * Some mock-up of the fosdem status text. Will be replaced with actually
  * drawn status text in future.
  */
-#define STATUS_TEXT_WIDTH 252
-#define STATUS_TEXT_HEIGHT 78
-#define STATUS_TEXT_CPP 4
-#define STATUS_TEXT_FORMAT DRM_FORMAT_ARGB8888
+#include <inttypes.h>
 
-static uint32_t status_text_bitmap[STATUS_TEXT_WIDTH * STATUS_TEXT_HEIGHT *
-				   STATUS_TEXT_CPP / 4] = {
+#include "fosdem_status_text.h"
+
+uint32_t status_text_bitmap[STATUS_TEXT_WIDTH * STATUS_TEXT_HEIGHT *
+			    STATUS_TEXT_CPP / 4] = {
 	0xFFFFFFFF, 0xFFFFFFFF, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,

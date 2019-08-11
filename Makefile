@@ -9,7 +9,14 @@ LDFLAGS += $(DRM_LDFLAGS)
 
 all: juggler
 
-juggler: kms.o capture.o juggler.o
+juggler_objects = \
+	fosdem_logo.o \
+	fosdem_status_text.o \
+	kms.o \
+	capture.o \
+	juggler.o
+
+juggler: $(juggler_objects)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
 clean:

@@ -9,13 +9,11 @@
  * FOSDEM logo as raw C code for easy use in our tool.
  * In future, this should be loaded from a png.
  */
+#include <inttypes.h>
 
-#define LOGO_WIDTH 105
-#define LOGO_HEIGHT 90
-#define LOGO_CPP 4
-#define LOGO_FORMAT DRM_FORMAT_XRGB8888
+#include "fosdem_logo.h"
 
-static uint32_t logo_bitmap[LOGO_WIDTH * LOGO_HEIGHT * LOGO_CPP / 4] = {
+uint32_t logo_bitmap[LOGO_WIDTH * LOGO_HEIGHT * LOGO_CPP / 4] = {
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
 	0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,

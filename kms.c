@@ -34,6 +34,9 @@
 #include "juggler.h"
 #include "kms.h"
 
+#include "fosdem_logo.h"
+#include "fosdem_status_text.h"
+
 pthread_t kms_thread[1];
 
 struct kms;
@@ -1026,9 +1029,6 @@ kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
 /*
  * Status LCD.
  */
-#include "fosdem_status_text.c"
-#include "fosdem_logo.c"
-
 static int
 kms_status_init(struct kms *kms)
 {
