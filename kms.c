@@ -748,7 +748,7 @@ kms_png_read(struct kms *kms, const char *filename)
 		return NULL;
 	}
 
-	image->format = PNG_FORMAT_ARGB;
+	image->format = PNG_FORMAT_BGRA;
 
 	printf("Reading from %s: %dx%d (%dbytes)\n", filename,
 	       image->width, image->height, PNG_IMAGE_SIZE(*image));
@@ -1236,18 +1236,8 @@ kms_thread_handler(void *arg)
 	struct kms *kms = (struct kms *) arg;
 	int ret, i;
 
-	for (i = 0; i < kms->count;) {
-		ret = kms_buffer_show(kms, kms->buffers[0], i);
-		if (ret)
-			return NULL;
-		i++;
-
-		ret = kms_buffer_show(kms, kms->buffers[1], i);
-		if (ret)
-			return NULL;
-		i++;
-
-		ret = kms_buffer_show(kms, kms->buffers[2], i);
+	for (i = 0; i < kms->count; i++) {
+		ret = kms_buffer_show(kms, kms->test_card, i);
 		if (ret)
 			return NULL;
 		i++;
@@ -1294,9 +1284,11 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
+#if 0
 	ret = kms_buffers_test_create(kms);
 	if (ret)
 		return ret;
+#endif
 
 	ret = pthread_create(kms_thread, NULL, kms_thread_handler,
 			     (void *) kms);
