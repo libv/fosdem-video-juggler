@@ -31,6 +31,8 @@
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
 
+#include <png.h>
+
 #include "juggler.h"
 #include "kms.h"
 
@@ -130,6 +132,8 @@ struct kms {
 	/* actual buffers */
 	int buffer_count;
 	struct buffer buffers[3][1];
+
+	struct buffer *test_card;
 
 	struct kms_status status[1];
 	struct kms_projector projector[1];
@@ -726,6 +730,58 @@ kms_buffer_argb8888_get(int kms_fd, struct buffer *buffer,
 }
 
 /*
+ *
+ */
+static struct buffer *
+kms_png_read(struct kms *kms, const char *filename)
+{
+	struct buffer *buffer;
+	png_image image[1] = {{
+		.version = PNG_IMAGE_VERSION,
+	}};
+	int ret;
+
+	ret = png_image_begin_read_from_file(image, filename);
+	if (ret != 1) {
+		fprintf(stderr, "%s(): read_from_file() failed: %s\n",
+			__func__, image->message);
+		return NULL;
+	}
+
+	image->format = PNG_FORMAT_ARGB;
+
+	printf("Reading from %s: %dx%d (%dbytes)\n", filename,
+	       image->width, image->height, PNG_IMAGE_SIZE(*image));
+
+	buffer = calloc(1, sizeof(struct buffer));
+
+	ret = kms_buffer_argb8888_get(kms->kms_fd, buffer,
+				      image->width, image->height,
+				      DRM_FORMAT_XRGB8888);
+	if (ret) {
+		fprintf(stderr, "%s(): failed to create buffer for %s\n",
+			__func__, filename);
+		free(buffer);
+		png_image_free(image);
+		return NULL;
+	}
+
+	ret = png_image_finish_read(image, NULL, buffer->planes[0].map, 0,
+				    NULL);
+	if (ret != 1) {
+		fprintf(stderr, "%s(): failed to read png for %s: %s\n",
+			__func__, filename, image->message);
+		/* we need to cleanly destroy buffers. */
+		free(buffer);
+		png_image_free(image);
+		return NULL;
+	}
+
+	png_image_free(image);
+	return buffer;
+}
+
+/*
  * Show input buffer on projector, scaled, with borders.
  */
 static void
@@ -1220,6 +1276,11 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	ret = kms_fd_init(kms, "sun4i-drm");
 	if (ret)
 		return ret;
+
+	kms->test_card =
+		kms_png_read(kms, "PM5644_test_card_FOSDEM.1280x720.png");
+	if (!kms->test_card)
+		return -1;
 
 	ret = kms_crtc_indices_get(kms);
 	if (ret)

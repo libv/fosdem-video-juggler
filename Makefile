@@ -3,9 +3,10 @@ LDFLAGS += -pthread
 
 # add drm
 CFLAGS += $(shell pkg-config --cflags libdrm)
-DRM_LDFLAGS = $(shell pkg-config --libs libdrm)
+LDFLAGS += $(shell pkg-config --libs libdrm)
 
-LDFLAGS += $(DRM_LDFLAGS)
+CFLAGS += $(shell pkg-config --cflags libpng)
+LDFLAGS += $(shell pkg-config --libs libpng)
 
 all: juggler
 
