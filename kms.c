@@ -81,6 +81,8 @@ struct kms_plane {
 	uint32_t property_src_formats;
 	uint32_t property_alpha;
 	uint32_t property_zpos;
+	uint32_t property_type;
+	uint32_t property_in_fence_id;
 };
 
 struct kms_display {
@@ -96,6 +98,8 @@ struct kms_display {
 	int crtc_height;
 };
 
+#define PLANES_USED_COUNT 16
+
 struct kms_status {
 	struct kms *kms;
 
@@ -108,6 +112,8 @@ struct kms_status {
 
 	struct kms_plane logo[1];
 	struct buffer logo_buffer[1];
+
+	uint32_t planes_used[PLANES_USED_COUNT];
 };
 
 struct kms_projector {
@@ -116,6 +122,8 @@ struct kms_projector {
 	struct kms_display display[1];
 
 	struct kms_plane capture[1];
+
+	uint32_t planes_used[PLANES_USED_COUNT];
 };
 
 struct kms {
@@ -555,6 +563,10 @@ kms_plane_properties_get(struct kms_plane *plane)
 			plane->property_alpha = property->prop_id;
 		else if (!strcmp(property->name, "zpos"))
 			plane->property_zpos = property->prop_id;
+		else if (!strcmp(property->name, "type"))
+			plane->property_type = property->prop_id;
+		else if (!strcmp(property->name, "IN_FENCE_FD"))
+			plane->property_in_fence_id = property->prop_id;
 		else
 			printf("Unhandled property: %s\n", property->name);
 
