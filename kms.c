@@ -104,26 +104,38 @@ struct kms_status {
 	struct kms *kms;
 
 	struct kms_display display[1];
+	int crtc_index;
 
-	struct kms_plane capture[1];
+	struct kms_plane *capture_scaling;
+	struct kms_plane *capture_yuv;
 
-	struct kms_plane text[1];
+	struct kms_plane *text;
 	struct buffer text_buffer[1];
 
-	struct kms_plane logo[1];
+	struct kms_plane *logo;
 	struct buffer logo_buffer[1];
 
-	uint32_t planes_used[PLANES_USED_COUNT];
+	/*
+	 * it could be that the primary plane is not used by us, and
+	 * should be disabled
+	 */
+	struct kms_plane *plane_disable;
 };
 
 struct kms_projector {
 	struct kms *kms;
 
 	struct kms_display display[1];
+	int crtc_index;
 
-	struct kms_plane capture[1];
+	struct kms_plane *capture_scaling;
+	struct kms_plane *capture_yuv;
 
-	uint32_t planes_used[PLANES_USED_COUNT];
+	/*
+	 * it could be that the primary plane is not used by us, and
+	 * should be disabled
+	 */
+	struct kms_plane *plane_disable;
 };
 
 struct kms {
@@ -432,107 +444,42 @@ kms_crtc_id_get(struct kms_display *display)
 	return 0;
 }
 
-/*
- * Todo, make sure that we use a plane only once.
- */
-static int
-kms_plane_id_get(struct kms_display *display, uint32_t format, int index)
+static struct kms_plane *
+kms_plane_create(struct kms *kms, uint32_t plane_id)
 {
-	struct kms *kms = display->kms;
-	drmModePlaneRes *resources_plane = NULL;
-	drmModePlane *plane;
-	uint32_t plane_id = 0;
-	int i, j, ret, crtc_index, count = 0;
-
-	crtc_index = kms_crtc_index_get(kms, display->crtc_id);
-
-	/* Get plane resources so we can start sifting through the planes */
-	resources_plane = drmModeGetPlaneResources(kms->kms_fd);
-	if (!resources_plane) {
-		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
-			__func__);
-		ret = 0;
-		goto error;
-	}
-
-	/* now cycle through the planes to find one for our crtc */
-	for (i = 0; i < (int) resources_plane->count_planes; i++) {
-		plane_id = resources_plane->planes[i];
-
-		plane = drmModeGetPlane(kms->kms_fd, plane_id);
-		if (!plane) {
-			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
-				__func__, plane_id, strerror(errno));
-			ret = 0;
-			goto error;
-		}
-
-		if (!(plane->possible_crtcs & (1 << crtc_index)))
-			goto plane_next;
-
-		for (j = 0; j < (int) plane->count_formats; j++)
-			if (plane->formats[j] == kms->format)
-				break;
-
-		if (j == (int) plane->count_formats)
-			goto plane_next;
-
-		if (count != index) {
-			count++;
-			goto plane_next;
-		}
-
-		drmModeFreePlane(plane);
-		break;
-
-	plane_next:
-		drmModeFreePlane(plane);
-		continue;
-	}
-
-	if (i == (int) resources_plane->count_planes) {
-		fprintf(stderr, "%s: failed to get a Plane for our needs.\n",
-			__func__);
-		ret = 0;
-		goto error;
-	}
-
-	ret = plane_id;
-
- error:
-	drmModeFreePlaneResources(resources_plane);
-	return ret;
-}
-
-static int
-kms_plane_properties_get(struct kms_plane *plane)
-{
+	struct kms_plane *plane;
 	drmModeObjectProperties *properties;
 	int i;
 
-	/* now that we have our plane, get the relevant property ids */
-	properties = drmModeObjectGetProperties(plane->kms->kms_fd,
-						plane->plane_id,
+	properties = drmModeObjectGetProperties(kms->kms_fd, plane_id,
 						DRM_MODE_OBJECT_PLANE);
 	if (!properties) {
-		/* yes, no properties returns EINVAL */
+		/* yes, if there are no properties, this returns EINVAL */
 		if (errno != EINVAL) {
 			fprintf(stderr,
-				"Failed to get object %u properties: %s\n",
-				plane->plane_id, strerror(errno));
-			return -errno;
+				"%s(0x%02X): Failed to get properties: %s\n",
+				__func__, plane_id, strerror(errno));
+			return NULL;
 		}
-		return 0;
+
+		return NULL;
 	}
+
+
+	plane = calloc(1, sizeof(struct kms_plane));
+
+	plane->kms = kms;
+
+	plane->plane_id = plane_id;
 
 	for (i = 0; i < (int) properties->count_props; i++) {
 		drmModePropertyRes *property;
 
-		property = drmModeGetProperty(plane->kms->kms_fd,
+		property = drmModeGetProperty(kms->kms_fd,
 					      properties->props[i]);
 		if (!property) {
 			fprintf(stderr, "Failed to get object %u "
-				"property %u: %s\n", plane->plane_id,
+				"property %u: %s\n", plane_id,
 				properties->props[i], strerror(errno));
 			continue;
 		}
@@ -575,19 +522,220 @@ kms_plane_properties_get(struct kms_plane *plane)
 
 	drmModeFreeObjectProperties(properties);
 
-	return 0;
+	return plane;
 }
 
-static void
-kms_layout_show(struct kms_display *display, struct kms_plane *plane,
-		const char *name)
+/*
+ * Get all the desired planes in one go.
+ */
+static int
+kms_status_planes_get(struct kms_status *status)
 {
-	printf("%s: %s, mode: %s\n", name,
-	       display->connected ? "connected" : "disconnected",
-	       display->mode_ok ? "set" : "disabled");
-	printf("\tFB -> Plane(0x%02X) -> CRTC(0x%02X) -> Encoder(0x%02X) ->"
-	       " Connector(0x%02X);\n", plane->plane_id,
-	       display->crtc_id, display->encoder_id, display->connector_id);
+	struct kms *kms = status->kms;
+	drmModePlaneRes *resources_plane = NULL;
+	int ret = 0, i;
+
+	/* Get plane resources so we can start sifting through the planes */
+	resources_plane = drmModeGetPlaneResources(kms->kms_fd);
+	if (!resources_plane) {
+		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
+			__func__);
+		ret = 0;
+		goto error;
+	}
+
+	/* now cycle through the planes to find one for our crtc */
+	for (i = 0; i < (int) resources_plane->count_planes; i++) {
+		drmModePlane *plane;
+		uint32_t plane_id = resources_plane->planes[i];
+		bool frontend = false, yuv = false, layer = false;
+		bool used = false;
+		int j;
+
+		plane = drmModeGetPlane(kms->kms_fd, plane_id);
+		if (!plane) {
+			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
+				__func__, plane_id, strerror(errno));
+			ret = 0;
+			goto error;
+		}
+
+		if (!(plane->possible_crtcs & (1 << status->crtc_index)))
+			goto plane_next;
+
+		for (j = 0; j < (int) plane->count_formats; j++) {
+			switch (plane->formats[j]) {
+			/* only supported by frontend */
+			case DRM_FORMAT_NV12:
+				frontend = true;
+				break;
+			/* supported by the frontend and yuv layers */
+			case DRM_FORMAT_R8_G8_B8:
+				yuv = true;
+				break;
+			/* not supported by the sprites */
+			case DRM_FORMAT_RGB565:
+				layer = true;
+				break;
+			default:
+				break;
+			}
+		}
+
+		if (frontend) {
+			status->capture_scaling =
+				kms_plane_create(kms, plane->plane_id);
+			if (!status->capture_scaling) {
+				ret = -1;
+				goto plane_error;
+			}
+			used = true;
+		} else if (yuv) {
+			status->capture_yuv =
+				kms_plane_create(kms, plane->plane_id);
+			if (!status->capture_yuv) {
+				ret = -1;
+				goto plane_error;
+			}
+			used = true;
+		} else if (!layer) {
+			if (!status->text) {
+				status->text =
+					kms_plane_create(kms, plane->plane_id);
+				if (!status->text) {
+					ret = -1;
+					goto plane_error;
+				}
+				used = true;
+			} else if (!status->logo) {
+				status->logo =
+					kms_plane_create(kms, plane->plane_id);
+				if (!status->logo) {
+					ret = -1;
+					goto plane_error;
+				}
+				used = true;
+			}
+		}
+
+		if (plane->fb_id && !used) {
+			if (!status->plane_disable) {
+				status->plane_disable =
+					kms_plane_create(kms, plane->plane_id);
+				/* if this fails, continue */
+			} else
+				fprintf(stderr, "%s: multiple planes need to "
+					"be disabled (%d, %d)!\n", __func__,
+					status->plane_disable->plane_id,
+					plane->plane_id);
+		}
+
+	plane_next:
+		drmModeFreePlane(plane);
+		continue;
+	plane_error:
+		drmModeFreePlane(plane);
+		break;
+	}
+
+ error:
+	drmModeFreePlaneResources(resources_plane);
+	return ret;
+}
+
+/*
+ * Get all the desired planes in one go.
+ */
+static int
+kms_projector_planes_get(struct kms_projector *projector)
+{
+	struct kms *kms = projector->kms;
+	drmModePlaneRes *resources_plane = NULL;
+	int ret = 0, i;
+
+	/* Get plane resources so we can start sifting through the planes */
+	resources_plane = drmModeGetPlaneResources(kms->kms_fd);
+	if (!resources_plane) {
+		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
+			__func__);
+		ret = 0;
+		goto error;
+	}
+
+	/* now cycle through the planes to find one for our crtc */
+	for (i = 0; i < (int) resources_plane->count_planes; i++) {
+		drmModePlane *plane;
+		uint32_t plane_id = resources_plane->planes[i];
+		bool frontend = false, yuv = false, used = false;
+		int j;
+
+		plane = drmModeGetPlane(kms->kms_fd, plane_id);
+		if (!plane) {
+			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
+				__func__, plane_id, strerror(errno));
+			ret = 0;
+			goto error;
+		}
+
+		if (!(plane->possible_crtcs & (1 << projector->crtc_index)))
+			goto plane_next;
+
+		for (j = 0; j < (int) plane->count_formats; j++) {
+			switch (plane->formats[j]) {
+			/* only supported by frontend */
+			case DRM_FORMAT_NV12:
+				frontend = true;
+				break;
+			/* supported by the frontend and yuv layers */
+			case DRM_FORMAT_R8_G8_B8:
+				yuv = true;
+				break;
+			default:
+				break;
+			}
+		}
+
+		if (frontend) {
+			projector->capture_scaling =
+				kms_plane_create(kms, plane->plane_id);
+			if (!projector->capture_scaling) {
+				ret = -1;
+				goto plane_error;
+			}
+			used = true;
+		} else if (yuv) {
+			projector->capture_yuv =
+				kms_plane_create(kms, plane->plane_id);
+			if (!projector->capture_yuv) {
+				ret = -1;
+				goto plane_error;
+			}
+			used = true;
+		}
+
+		if (plane->fb_id && !used) {
+			if (!projector->plane_disable) {
+				projector->plane_disable =
+					kms_plane_create(kms, plane->plane_id);
+				/* if this fails, continue */
+			} else
+				fprintf(stderr, "%s: multiple planes need to "
+					"be disabled (%d, %d)!\n", __func__,
+					projector->plane_disable->plane_id,
+					plane->plane_id);
+		}
+
+	plane_next:
+		drmModeFreePlane(plane);
+		continue;
+	plane_error:
+		drmModeFreePlane(plane);
+		break;
+	}
+
+ error:
+	drmModeFreePlaneResources(resources_plane);
+	return ret;
 }
 
 static int
@@ -802,7 +950,7 @@ kms_projector_capture_set(struct kms_projector *projector,
 			  drmModeAtomicReqPtr request)
 {
 	struct kms_display *display = projector->display;
-	struct kms_plane *plane = projector->capture;
+	struct kms_plane *plane = projector->capture_scaling;
 
 	if (!plane->active) {
 		int x, y, w, h;
@@ -873,7 +1021,6 @@ kms_projector_init(struct kms *kms)
 {
 	struct kms_projector *projector = kms->projector;
 	struct kms_display *display = projector->display;
-	struct kms_plane *plane = projector->capture;
 	int ret;
 
 	projector->kms = kms;
@@ -891,16 +1038,15 @@ kms_projector_init(struct kms *kms)
 	if (ret)
 		return ret;
 
-	plane->kms = kms;
-	plane->plane_id = kms_plane_id_get(display, kms->format, 0);
-	if (!plane->plane_id)
-		return -ENODEV;
-
-	ret = kms_plane_properties_get(plane);
-	if (ret)
+	ret = kms_crtc_index_get(kms, display->crtc_id);
+	if (ret < 0)
 		return ret;
 
-	kms_layout_show(display, plane, "Projector");
+	projector->crtc_index = ret;
+
+	ret = kms_projector_planes_get(projector);
+	if (ret)
+		return ret;
 
 	return 0;
 }
@@ -913,7 +1059,7 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 		       drmModeAtomicReqPtr request)
 {
 	struct kms_display *display = status->display;
-	struct kms_plane *plane = status->capture;
+	struct kms_plane *plane = status->capture_scaling;
 
 	if (!plane->active) {
 		int x, y, w, h;
@@ -954,6 +1100,8 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 			y = (display->crtc_height -h) / 2;
 		}
 #endif
+
+		printf("%s(): %4dx%4d -> %4dx%4d\n", __func__, x, y, w, h);
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_crtc_x, x);
@@ -1102,9 +1250,6 @@ kms_status_init(struct kms *kms)
 {
 	struct kms_status *status = kms->status;
 	struct kms_display *display = status->display;
-	struct kms_plane *capture = status->capture;
-	struct kms_plane *text = status->text;
-	struct kms_plane *logo = status->logo;
 	int ret;
 
 	status->kms = kms;
@@ -1122,27 +1267,15 @@ kms_status_init(struct kms *kms)
 	if (ret)
 		return ret;
 
-	capture->kms = kms;
-	capture->plane_id = kms_plane_id_get(display, kms->format, 0);
-	if (!capture->plane_id)
-		return -ENODEV;
-
-	ret = kms_plane_properties_get(capture);
-	if (ret)
+	ret = kms_crtc_index_get(kms, display->crtc_id);
+	if (ret < 0)
 		return ret;
 
-	kms_layout_show(display, capture, "Status:Capture");
+	status->crtc_index = ret;
 
-	text->kms = kms;
-	text->plane_id = kms_plane_id_get(display,  STATUS_TEXT_FORMAT, 1);
-	if (!text->plane_id)
-		return -ENODEV;
-
-	ret = kms_plane_properties_get(text);
+	ret = kms_status_planes_get(status);
 	if (ret)
 		return ret;
-
-	kms_layout_show(display, text, "Status:Text");
 
 	ret = kms_buffer_argb8888_get(kms->kms_fd, status->text_buffer,
 				      STATUS_TEXT_WIDTH, STATUS_TEXT_HEIGHT,
@@ -1152,17 +1285,6 @@ kms_status_init(struct kms *kms)
 
 	memcpy(status->text_buffer->planes[0].map, status_text_bitmap,
 	       status->text_buffer->planes[0].size);
-
-	logo->kms = kms;
-	logo->plane_id = kms_plane_id_get(display, LOGO_FORMAT, 2);
-	if (!logo->plane_id)
-		return -ENODEV;
-
-	ret = kms_plane_properties_get(logo);
-	if (ret)
-		return ret;
-
-	kms_layout_show(display, logo, "Status:Logo");
 
 	ret = kms_buffer_argb8888_get(kms->kms_fd, status->logo_buffer,
 				      LOGO_WIDTH, LOGO_HEIGHT, LOGO_FORMAT);
@@ -1184,8 +1306,8 @@ kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 	request = drmModeAtomicAlloc();
 
 	kms_status_capture_set(kms->status, buffer, request);
-	kms_status_text_set(kms->status, request);
-	kms_status_logo_set(kms->status, request);
+	//kms_status_text_set(kms->status, request);
+	//kms_status_logo_set(kms->status, request);
 
 	kms_projector_capture_set(kms->projector, buffer, request);
 
