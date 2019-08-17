@@ -638,6 +638,9 @@ kms_status_planes_get(struct kms_status *status)
 		break;
 	}
 
+	if (status->plane_disable)
+		status->plane_disable->active = true;
+
  error:
 	drmModeFreePlaneResources(resources_plane);
 	return ret;
@@ -732,6 +735,9 @@ kms_projector_planes_get(struct kms_projector *projector)
 		drmModeFreePlane(plane);
 		break;
 	}
+
+	if (projector->plane_disable)
+		projector->plane_disable->active = true;
 
  error:
 	drmModeFreePlaneResources(resources_plane);
@@ -1297,6 +1303,66 @@ kms_status_init(struct kms *kms)
 	return 0;
 }
 
+/*
+ * Yes, you really need all this to disable a plane.
+ */
+static void
+kms_plane_disable(struct kms_plane *kms_plane, drmModeAtomicReqPtr request)
+{
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_crtc_id, 0);
+
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_crtc_x, 0);
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_crtc_y, 0);
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_crtc_w, 0);
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_crtc_h, 0);
+
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_src_x, 0);
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_src_y, 0);
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_src_w, 0);
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_src_h, 0);
+
+	drmModeAtomicAddProperty(request, kms_plane->plane_id,
+				 kms_plane->property_fb_id, 0);
+
+	kms_plane->active = false;
+}
+
+static int
+kms_status_frame_set(struct kms_status *status, drmModeAtomicReqPtr request,
+		     struct buffer *buffer)
+{
+	kms_status_capture_set(status, buffer, request);
+	//kms_status_text_set(status, request);
+	//kms_status_logo_set(status, request);
+
+	if (status->plane_disable && status->plane_disable->active)
+		kms_plane_disable(status->plane_disable, request);
+
+	return 0;
+}
+
+static int
+kms_projector_frame_set(struct kms_projector *projector,
+			drmModeAtomicReqPtr request,
+			struct buffer *buffer)
+{
+	kms_projector_capture_set(projector, buffer, request);
+
+	if (projector->plane_disable && projector->plane_disable->active)
+		kms_plane_disable(projector->plane_disable, request);
+
+	return 0;
+}
+
 static int
 kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 {
@@ -1305,11 +1371,9 @@ kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 
 	request = drmModeAtomicAlloc();
 
-	kms_status_capture_set(kms->status, buffer, request);
-	//kms_status_text_set(kms->status, request);
-	//kms_status_logo_set(kms->status, request);
+	kms_status_frame_set(kms->status, request, buffer);
 
-	kms_projector_capture_set(kms->projector, buffer, request);
+	kms_projector_frame_set(kms->projector, request, buffer);
 
 	ret = drmModeAtomicCommit(kms->kms_fd, request,
 				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
