@@ -11,7 +11,7 @@
 #define LOGO_WIDTH 105
 #define LOGO_HEIGHT 90
 #define LOGO_CPP 4
-#define LOGO_FORMAT DRM_FORMAT_XRGB8888
+#define LOGO_FORMAT DRM_FORMAT_ARGB8888
 
 extern uint32_t logo_bitmap[];
 

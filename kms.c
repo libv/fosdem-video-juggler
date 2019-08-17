@@ -1341,8 +1341,8 @@ kms_status_frame_set(struct kms_status *status, drmModeAtomicReqPtr request,
 		     struct buffer *buffer)
 {
 	kms_status_capture_set(status, buffer, request);
-	//kms_status_text_set(status, request);
-	//kms_status_logo_set(status, request);
+	kms_status_text_set(status, request);
+	kms_status_logo_set(status, request);
 
 	if (status->plane_disable && status->plane_disable->active)
 		kms_plane_disable(status->plane_disable, request);
