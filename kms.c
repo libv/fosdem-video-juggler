@@ -1131,8 +1131,8 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 					 buffer->height << 16);
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_alpha,
-					 0x6000);
-		//0xFFFF);
+					 0x4000);
+
 		plane->active = true;
 	}
 
@@ -1238,6 +1238,10 @@ kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_src_h,
 					 buffer->height << 16);
+
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_zpos,
+					 4);
 
 		plane->active = true;
 	}
