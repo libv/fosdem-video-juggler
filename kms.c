@@ -113,7 +113,7 @@ struct kms_status {
 	struct buffer text_buffer[1];
 
 	struct kms_plane *logo;
-	struct buffer logo_buffer[1];
+	struct buffer *logo_buffer;
 
 	/*
 	 * it could be that the primary plane is not used by us, and
@@ -923,7 +923,7 @@ kms_png_read(struct kms *kms, const char *filename)
 
 	ret = kms_buffer_argb8888_get(kms->kms_fd, buffer,
 				      image->width, image->height,
-				      DRM_FORMAT_XRGB8888);
+				      DRM_FORMAT_ARGB8888);
 	if (ret) {
 		fprintf(stderr, "%s(): failed to create buffer for %s\n",
 			__func__, filename);
@@ -1296,13 +1296,9 @@ kms_status_init(struct kms *kms)
 	memcpy(status->text_buffer->planes[0].map, status_text_bitmap,
 	       status->text_buffer->planes[0].size);
 
-	ret = kms_buffer_argb8888_get(kms->kms_fd, status->logo_buffer,
-				      LOGO_WIDTH, LOGO_HEIGHT, LOGO_FORMAT);
-	if (ret)
-		return ret;
-
-	memcpy(status->logo_buffer->planes[0].map, logo_bitmap,
-	       status->logo_buffer->planes[0].size);
+	status->logo_buffer = kms_png_read(kms, "fosdem_logo.png");
+	if (!status->logo_buffer)
+		return -1;
 
 	return 0;
 }
