@@ -36,8 +36,6 @@
 #include "juggler.h"
 #include "kms.h"
 
-#include "fosdem_status_text.h"
-
 pthread_t kms_thread[1];
 
 struct kms;
@@ -109,7 +107,7 @@ struct kms_status {
 	struct kms_plane *capture_yuv;
 
 	struct kms_plane *text;
-	struct buffer text_buffer[1];
+	struct buffer *text_buffer;
 
 	struct kms_plane *logo;
 	struct buffer *logo_buffer;
@@ -1286,14 +1284,9 @@ kms_status_init(struct kms *kms)
 	if (ret)
 		return ret;
 
-	ret = kms_buffer_argb8888_get(kms->kms_fd, status->text_buffer,
-				      STATUS_TEXT_WIDTH, STATUS_TEXT_HEIGHT,
-				      STATUS_TEXT_FORMAT);
-	if (ret)
-		return ret;
-
-	memcpy(status->text_buffer->planes[0].map, status_text_bitmap,
-	       status->text_buffer->planes[0].size);
+	status->text_buffer = kms_png_read(kms, "status_text.png");
+	if (!status->text_buffer)
+		return -1;
 
 	status->logo_buffer = kms_png_read(kms, "fosdem_logo.png");
 	if (!status->logo_buffer)
