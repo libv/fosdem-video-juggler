@@ -36,7 +36,6 @@
 #include "juggler.h"
 #include "kms.h"
 
-#include "fosdem_logo.h"
 #include "fosdem_status_text.h"
 
 pthread_t kms_thread[1];

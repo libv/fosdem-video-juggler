@@ -11,7 +11,6 @@ LDFLAGS += $(shell pkg-config --libs libpng)
 all: juggler
 
 juggler_objects = \
-	fosdem_logo.o \
 	fosdem_status_text.o \
 	kms.o \
 	capture.o \
