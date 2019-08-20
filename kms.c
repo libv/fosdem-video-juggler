@@ -83,8 +83,6 @@ struct kms_plane {
 	uint32_t property_in_fence_id;
 };
 
-#define PLANES_USED_COUNT 16
-
 struct kms_status {
 	struct kms *kms;
 
@@ -140,12 +138,6 @@ struct kms_projector {
 struct kms {
 	int kms_fd;
 
-	/* buffer info */
-	int width;
-	int height;
-	int bpp;
-	uint32_t format;
-
 	unsigned long count;
 
 	/* actual buffers */
@@ -195,6 +187,7 @@ kms_fd_init(struct kms *kms, const char *driver_name)
 
 	return 0;
 }
+
 static __maybe_unused char *
 kms_encoder_string(uint32_t encoder)
 {
@@ -1388,13 +1381,14 @@ kms_status_frame_update(struct kms_status *status,
 	return ret;
 }
 
-static int
-kms_buffers_test_create(struct kms *kms)
+static __maybe_unused int
+kms_buffers_test_create(struct kms *kms, int width, int height, int bpp,
+			uint32_t format)
 {
 	int ret;
 
 	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[0],
-				    kms->width, kms->height, kms->format);
+				    width, height, format);
 	if (ret)
 		return ret;
 
@@ -1402,7 +1396,7 @@ kms_buffers_test_create(struct kms *kms)
 	       kms->buffers[0]->planes[0].size);
 
 	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[1],
-				    kms->width, kms->height, kms->format);
+				    width, height, format);
 	if (ret)
 		return ret;
 
@@ -1410,7 +1404,7 @@ kms_buffers_test_create(struct kms *kms)
 	       kms->buffers[1]->planes[1].size);
 
 	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[2],
-				    kms->width, kms->height, kms->format);
+				    width, height, format);
 	if (ret)
 		return ret;
 
@@ -1469,11 +1463,6 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 
 	kms = calloc(1, sizeof(struct kms));
 
-	kms->width = width;
-	kms->height = height;
-	kms->bpp = bpp;
-	kms->format = format;
-
 	kms->count = count;
 
 	ret = kms_fd_init(kms, "sun4i-drm");
@@ -1490,7 +1479,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 		return ret;
 
 #if 0
-	ret = kms_buffers_test_create(kms);
+	ret = kms_buffers_test_create(kms, width, height, bpp, format);
 	if (ret)
 		return ret;
 #endif
