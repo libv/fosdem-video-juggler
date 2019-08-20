@@ -1424,13 +1424,35 @@ kms_projector_thread_handler(void *arg)
 	if (ret)
 		return NULL;
 
-	for (i = 0; i < kms->count; i++) {
-		ret = kms_projector_frame_update(kms->projector,
-						 kms->test_card, i);
-		if (ret)
-			return NULL;
-		i++;
+	if (kms->test_card) {
+		for (i = 0; i < kms->count; i++) {
+			ret = kms_projector_frame_update(kms->projector,
+						      kms->test_card, i);
+			if (ret)
+				return NULL;
+		}
+	} else {
+		for (i = 0; i < kms->count;) {
+			ret = kms_projector_frame_update(kms->projector,
+							 kms->buffers[0], i);
+			if (ret)
+				return NULL;
+			i++;
+
+			ret = kms_projector_frame_update(kms->projector,
+							 kms->buffers[1], i);
+			if (ret)
+				return NULL;
+			i++;
+
+			ret = kms_projector_frame_update(kms->projector,
+							 kms->buffers[2], i);
+			if (ret)
+				return NULL;
+			i++;
+		}
 	}
+	printf("%s: done!\n", __func__);
 
 	return NULL;
 }
@@ -1445,12 +1467,35 @@ kms_status_thread_handler(void *arg)
 	if (ret)
 		return NULL;
 
-	for (i = 0; i < kms->count; i++) {
-		ret = kms_status_frame_update(kms->status, kms->test_card, i);
-		if (ret)
-			return NULL;
-		i++;
+	if (kms->test_card) {
+		for (i = 0; i < kms->count; i++) {
+			ret = kms_status_frame_update(kms->status,
+						      kms->test_card, i);
+			if (ret)
+				return NULL;
+		}
+	} else {
+		for (i = 0; i < kms->count;) {
+			ret = kms_status_frame_update(kms->status,
+						      kms->buffers[0], i);
+			if (ret)
+				return NULL;
+			i++;
+
+			ret = kms_status_frame_update(kms->status,
+						      kms->buffers[1], i);
+			if (ret)
+				return NULL;
+			i++;
+
+			ret = kms_status_frame_update(kms->status,
+						      kms->buffers[2], i);
+			if (ret)
+				return NULL;
+			i++;
+		}
 	}
+	printf("%s: done!\n", __func__);
 
 	return NULL;
 }
@@ -1469,16 +1514,16 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	kms->test_card =
-		kms_png_read(kms, "PM5644_test_card_FOSDEM.1280x720.png");
-	if (!kms->test_card)
-		return -1;
-
 	ret = kms_crtc_indices_get(kms);
 	if (ret)
 		return ret;
 
 #if 0
+	kms->test_card =
+		kms_png_read(kms, "PM5644_test_card_FOSDEM.1280x720.png");
+	if (!kms->test_card)
+		return -1;
+#else
 	ret = kms_buffers_test_create(kms, width, height, bpp, format);
 	if (ret)
 		return ret;
