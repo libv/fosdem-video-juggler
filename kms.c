@@ -82,7 +82,9 @@ struct kms_plane {
 	uint32_t property_in_fence_id;
 };
 
-struct kms_display {
+#define PLANES_USED_COUNT 16
+
+struct kms_status {
 	struct kms *kms;
 
 	bool connected;
@@ -93,14 +95,6 @@ struct kms_display {
 	uint32_t crtc_id;
 	int crtc_width;
 	int crtc_height;
-};
-
-#define PLANES_USED_COUNT 16
-
-struct kms_status {
-	struct kms *kms;
-
-	struct kms_display display[1];
 	int crtc_index;
 
 	struct kms_plane *capture_scaling;
@@ -122,7 +116,14 @@ struct kms_status {
 struct kms_projector {
 	struct kms *kms;
 
-	struct kms_display display[1];
+	bool connected;
+	bool mode_ok;
+
+	uint32_t connector_id;
+	uint32_t encoder_id;
+	uint32_t crtc_id;
+	int crtc_width;
+	int crtc_height;
 	int crtc_index;
 
 	struct kms_plane *capture_scaling;
@@ -276,9 +277,8 @@ kms_connection_string(drmModeConnection connection)
 }
 
 static int
-kms_connector_id_get(struct kms_display *display, uint32_t type)
+kms_connector_id_get(struct kms *kms, uint32_t type, uint32_t *id_ret)
 {
-	struct kms *kms = display->kms;
 	drmModeRes *resources;
 	drmModeConnector *connector = NULL;
 	uint32_t connector_id = 0;
@@ -317,7 +317,7 @@ kms_connector_id_get(struct kms_display *display, uint32_t type)
 		goto error;
 	}
 
-	display->connector_id = connector_id;
+	*id_ret = connector_id;
 	drmModeFreeConnector(connector);
 	ret = 0;
 
@@ -374,24 +374,24 @@ kms_crtc_index_get(struct kms *kms, uint32_t id)
  * DRM/KMS clunk galore.
  */
 static int
-kms_connection_check(struct kms_display *display)
+kms_connection_check(struct kms *kms, uint32_t connector_id,
+		     bool *connected, uint32_t *encoder_id)
 {
-	struct kms *kms = display->kms;
 	drmModeConnector *connector = NULL;
 
 	/* Check whether our connector is connected. */
-	connector = drmModeGetConnector(kms->kms_fd, display->connector_id);
+	connector = drmModeGetConnector(kms->kms_fd, connector_id);
 	if (!connector) {
 		fprintf(stderr, "%s: failed to get Connector %u: %s\n",
-			__func__, display->connector_id, strerror(errno));
+			__func__, connector_id, strerror(errno));
 		return -errno;
 	}
 
 	if (connector->connection != DRM_MODE_CONNECTED) {
-		display->connected = false;
+		*connected = false;
 	} else {
-		display->connected = true;
-		display->encoder_id = connector->encoder_id;
+		*connected = true;
+		*encoder_id = connector->encoder_id;
 	}
 
 	drmModeFreeConnector(connector);
@@ -399,42 +399,42 @@ kms_connection_check(struct kms_display *display)
 }
 
 static int
-kms_crtc_id_get(struct kms_display *display)
+kms_crtc_id_get(struct kms *kms, uint32_t encoder_id, uint32_t *crtc_id,
+		bool *ok, int *width, int *height)
 {
-	struct kms *kms = display->kms;
 	drmModeEncoder *encoder;
 	drmModeCrtc *crtc;
 
-	encoder = drmModeGetEncoder(kms->kms_fd, display->encoder_id);
+	encoder = drmModeGetEncoder(kms->kms_fd, encoder_id);
 	if (!encoder) {
 		fprintf(stderr, "%s: failed to get Encoder %u: %s\n",
-			__func__, display->encoder_id, strerror(errno));
+			__func__, encoder_id, strerror(errno));
 		return -errno;
 	}
 
-	display->crtc_id = encoder->crtc_id;
+	*crtc_id = encoder->crtc_id;
 	drmModeFreeEncoder(encoder);
 
-	crtc = drmModeGetCrtc(kms->kms_fd, display->crtc_id);
+	crtc = drmModeGetCrtc(kms->kms_fd, *crtc_id);
 	if (!crtc) {
 		fprintf(stderr, "%s: failed to get CRTC %u: %s\n",
-			__func__, display->crtc_id, strerror(errno));
+			__func__, *crtc_id, strerror(errno));
 		return -errno;
 	}
 
 	if (!crtc->mode_valid) {
 		fprintf(stderr, "%s: CRTC %u does not have a valid mode\n",
-			__func__, display->crtc_id);
+			__func__, *crtc_id);
 
-		display->mode_ok = false;
+		*ok = false;
 		drmModeFreeCrtc(crtc);
 
 		return -EINVAL;
 	}
 
-	display->mode_ok = true;
-	display->crtc_width = crtc->width;
-	display->crtc_height = crtc->height;
+	*ok = true;
+	*width = crtc->width;
+	*height = crtc->height;
 
 	drmModeFreeCrtc(crtc);
 
@@ -952,7 +952,6 @@ kms_projector_capture_set(struct kms_projector *projector,
 			  struct buffer *buffer,
 			  drmModeAtomicReqPtr request)
 {
-	struct kms_display *display = projector->display;
 	struct kms_plane *plane = projector->capture_scaling;
 
 	if (!plane->active) {
@@ -960,31 +959,31 @@ kms_projector_capture_set(struct kms_projector *projector,
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_crtc_id,
-					 display->crtc_id);
+					 projector->crtc_id);
 
 		/* Scale, with borders, and center */
-		if ((buffer->width == display->crtc_width) &&
-		    (buffer->height == display->crtc_height)) {
+		if ((buffer->width == projector->crtc_width) &&
+		    (buffer->height == projector->crtc_height)) {
 			x = 0;
 			y = 0;
-			w = display->crtc_width;
-			h = display->crtc_height;
+			w = projector->crtc_width;
+			h = projector->crtc_height;
 		} else {
 			/* first, try to fit horizontally. */
-			w = display->crtc_width;
-			h = buffer->height * display->crtc_width /
+			w = projector->crtc_width;
+			h = buffer->height * projector->crtc_width /
 				buffer->width;
 
 			/* if height does not fit, inverse the logic */
-			if (h > display->crtc_height) {
-				h = display->crtc_height;
-				w = buffer->width * display->crtc_height /
+			if (h > projector->crtc_height) {
+				h = projector->crtc_height;
+				w = buffer->width * projector->crtc_height /
 					buffer->height;
 			}
 
 			/* center */
-			x = (display->crtc_width - w) / 2;
-			y = (display->crtc_height -h) / 2;
+			x = (projector->crtc_width - w) / 2;
+			y = (projector->crtc_height -h) / 2;
 		}
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
@@ -1023,25 +1022,28 @@ static int
 kms_projector_init(struct kms *kms)
 {
 	struct kms_projector *projector = kms->projector;
-	struct kms_display *display = projector->display;
 	int ret;
 
 	projector->kms = kms;
-	display->kms = kms;
 
-	ret = kms_connector_id_get(display, DRM_MODE_CONNECTOR_HDMIA);
+	ret = kms_connector_id_get(kms, DRM_MODE_CONNECTOR_HDMIA,
+				   &projector->connector_id);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(display);
+	ret = kms_connection_check(kms, projector->connector_id,
+				   &projector->connected,
+				   &projector->encoder_id);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_id_get(display);
+	ret = kms_crtc_id_get(kms, projector->encoder_id,
+			      &projector->crtc_id, &projector->mode_ok,
+			      &projector->crtc_width, &projector->crtc_height);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_index_get(kms, display->crtc_id);
+	ret = kms_crtc_index_get(kms, projector->crtc_id);
 	if (ret < 0)
 		return ret;
 
@@ -1061,7 +1063,6 @@ static void
 kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 		       drmModeAtomicReqPtr request)
 {
-	struct kms_display *display = status->display;
 	struct kms_plane *plane = status->capture_scaling;
 
 	if (!plane->active) {
@@ -1069,38 +1070,38 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_crtc_id,
-					 display->crtc_id);
+					 status->crtc_id);
 
 #if 0
 		/* top right corner */
-		x = display->crtc_width / 2;
+		x = status->crtc_width / 2;
 		y = 0;
-		w = display->crtc_width / 2;
+		w = status->crtc_width / 2;
 		h = buffer->height * w / buffer->width;
 #else
 				/* Scale, with borders, and center */
-		if ((buffer->width == display->crtc_width) &&
-		    (buffer->height == display->crtc_height)) {
+		if ((buffer->width == status->crtc_width) &&
+		    (buffer->height == status->crtc_height)) {
 			x = 0;
 			y = 0;
-			w = display->crtc_width;
-			h = display->crtc_height;
+			w = status->crtc_width;
+			h = status->crtc_height;
 		} else {
 			/* first, try to fit horizontally. */
-			w = display->crtc_width;
-			h = buffer->height * display->crtc_width /
+			w = status->crtc_width;
+			h = buffer->height * status->crtc_width /
 				buffer->width;
 
 			/* if height does not fit, inverse the logic */
-			if (h > display->crtc_height) {
-				h = display->crtc_height;
-				w = buffer->width * display->crtc_height /
+			if (h > status->crtc_height) {
+				h = status->crtc_height;
+				w = buffer->width * status->crtc_height /
 					buffer->height;
 			}
 
 			/* center */
-			x = (display->crtc_width - w) / 2;
-			y = (display->crtc_height -h) / 2;
+			x = (status->crtc_width - w) / 2;
+			y = (status->crtc_height -h) / 2;
 		}
 #endif
 
@@ -1145,7 +1146,6 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 static void
 kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
 {
-	struct kms_display *display = status->display;
 	struct kms_plane *plane = status->text;
 	struct buffer *buffer = status->text_buffer;
 
@@ -1154,11 +1154,11 @@ kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_crtc_id,
-					 display->crtc_id);
+					 status->crtc_id);
 
 		/* bottom, with a bit of space remaining */
 		x = 8;
-		y = display->crtc_height - 8 - buffer->height;
+		y = status->crtc_height - 8 - buffer->height;
 		w = buffer->width;
 		h = buffer->height;
 
@@ -1198,7 +1198,6 @@ kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
 static void
 kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
 {
-	struct kms_display *display = status->display;
 	struct kms_plane *plane = status->logo;
 	struct buffer *buffer = status->logo_buffer;
 
@@ -1207,10 +1206,10 @@ kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
 
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_crtc_id,
-					 display->crtc_id);
+					 status->crtc_id);
 
 		/* top right, with a bit of space remaining */
-		x = display->crtc_width - 8 - buffer->width;
+		x = status->crtc_width - 8 - buffer->width;
 		y = 8;
 		w = buffer->width;
 		h = buffer->height;
@@ -1256,25 +1255,27 @@ static int
 kms_status_init(struct kms *kms)
 {
 	struct kms_status *status = kms->status;
-	struct kms_display *display = status->display;
 	int ret;
 
 	status->kms = kms;
-	display->kms = kms;
 
-	ret = kms_connector_id_get(display, DRM_MODE_CONNECTOR_DPI);
+	ret = kms_connector_id_get(kms, DRM_MODE_CONNECTOR_DPI,
+				   &status->connector_id);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(display);
+	ret = kms_connection_check(kms, status->connector_id,
+				   &status->connected, &status->encoder_id);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_id_get(display);
+	ret = kms_crtc_id_get(kms, status->encoder_id,
+			      &status->crtc_id, &status->mode_ok,
+			      &status->crtc_width, &status->crtc_height);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_index_get(kms, display->crtc_id);
+	ret = kms_crtc_index_get(kms, status->crtc_id);
 	if (ret < 0)
 		return ret;
 
