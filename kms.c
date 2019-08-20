@@ -36,7 +36,8 @@
 #include "juggler.h"
 #include "kms.h"
 
-pthread_t kms_thread[1];
+pthread_t kms_projector_thread[1];
+pthread_t kms_status_thread[1];
 
 struct kms;
 
@@ -1330,45 +1331,20 @@ kms_plane_disable(struct kms_plane *kms_plane, drmModeAtomicReqPtr request)
 }
 
 static int
-kms_status_frame_set(struct kms_status *status, drmModeAtomicReqPtr request,
-		     struct buffer *buffer)
-{
-	kms_status_capture_set(status, buffer, request);
-	kms_status_text_set(status, request);
-	kms_status_logo_set(status, request);
-
-	if (status->plane_disable && status->plane_disable->active)
-		kms_plane_disable(status->plane_disable, request);
-
-	return 0;
-}
-
-static int
-kms_projector_frame_set(struct kms_projector *projector,
-			drmModeAtomicReqPtr request,
-			struct buffer *buffer)
-{
-	kms_projector_capture_set(projector, buffer, request);
-
-	if (projector->plane_disable && projector->plane_disable->active)
-		kms_plane_disable(projector->plane_disable, request);
-
-	return 0;
-}
-
-static int
-kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
+kms_projector_frame_update(struct kms_projector *projector,
+			   struct buffer *buffer, int frame)
 {
 	drmModeAtomicReqPtr request;
 	int ret;
 
 	request = drmModeAtomicAlloc();
 
-	kms_status_frame_set(kms->status, request, buffer);
+	kms_projector_capture_set(projector, buffer, request);
 
-	kms_projector_frame_set(kms->projector, request, buffer);
+	if (projector->plane_disable && projector->plane_disable->active)
+		kms_plane_disable(projector->plane_disable, request);
 
-	ret = drmModeAtomicCommit(kms->kms_fd, request,
+	ret = drmModeAtomicCommit(projector->kms->kms_fd, request,
 				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
 
 	drmModeAtomicFree(request);
@@ -1378,15 +1354,38 @@ kms_buffer_show(struct kms *kms, struct buffer *buffer, int frame)
 			__func__, buffer->fb_id, strerror(errno));
 		ret = -errno;
 	}
-#if 0
-	else {
-		printf("\rShowing fb %02u for frame %d", buffer->fb_id, frame);
-		fflush(stdout);
-	}
-#endif
 
 	return ret;
+}
 
+static int
+kms_status_frame_update(struct kms_status *status,
+			struct buffer *buffer, int frame)
+{
+	drmModeAtomicReqPtr request;
+	int ret;
+
+	request = drmModeAtomicAlloc();
+
+	kms_status_capture_set(status, buffer, request);
+	kms_status_text_set(status, request);
+	kms_status_logo_set(status, request);
+
+	if (status->plane_disable && status->plane_disable->active)
+		kms_plane_disable(status->plane_disable, request);
+
+	ret = drmModeAtomicCommit(status->kms->kms_fd, request,
+				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+
+	drmModeAtomicFree(request);
+
+	if (ret) {
+		fprintf(stderr, "%s: failed to show fb %02u: %s\n",
+			__func__, buffer->fb_id, strerror(errno));
+		ret = -errno;
+	}
+
+	return ret;
 }
 
 static int
@@ -1422,19 +1421,42 @@ kms_buffers_test_create(struct kms *kms)
 }
 
 static void *
-kms_thread_handler(void *arg)
+kms_projector_thread_handler(void *arg)
 {
 	struct kms *kms = (struct kms *) arg;
 	int ret, i;
 
+	ret = kms_projector_init(kms);
+	if (ret)
+		return NULL;
+
 	for (i = 0; i < kms->count; i++) {
-		ret = kms_buffer_show(kms, kms->test_card, i);
+		ret = kms_projector_frame_update(kms->projector,
+						 kms->test_card, i);
 		if (ret)
 			return NULL;
 		i++;
 	}
 
-	//printf("\n");
+	return NULL;
+}
+
+static void *
+kms_status_thread_handler(void *arg)
+{
+	struct kms *kms = (struct kms *) arg;
+	int ret, i;
+
+	ret = kms_status_init(kms);
+	if (ret)
+		return NULL;
+
+	for (i = 0; i < kms->count; i++) {
+		ret = kms_status_frame_update(kms->status, kms->test_card, i);
+		if (ret)
+			return NULL;
+		i++;
+	}
 
 	return NULL;
 }
@@ -1467,24 +1489,26 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	ret = kms_status_init(kms);
-	if (ret)
-		return ret;
-
-	ret = kms_projector_init(kms);
-	if (ret)
-		return ret;
-
 #if 0
 	ret = kms_buffers_test_create(kms);
 	if (ret)
 		return ret;
 #endif
 
-	ret = pthread_create(kms_thread, NULL, kms_thread_handler,
+	ret = pthread_create(kms_status_thread, NULL,
+			     kms_status_thread_handler,
 			     (void *) kms);
 	if (ret) {
-		fprintf(stderr, "%s() thread creation failed: %s\n",
+		fprintf(stderr, "%s() status thread creation failed: %s\n",
+			__func__, strerror(ret));
+		return ret;
+	}
+
+	ret = pthread_create(kms_projector_thread, NULL,
+			     kms_projector_thread_handler,
+			     (void *) kms);
+	if (ret) {
+		fprintf(stderr, "%s() projector thread creation failed: %s\n",
 			__func__, strerror(ret));
 		return ret;
 	}
