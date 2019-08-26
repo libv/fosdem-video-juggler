@@ -22,6 +22,9 @@ struct capture_buffer;
 
 int kms_buffer_import(struct capture_buffer *buffer);
 
+void kms_projector_capture_display(struct capture_buffer *buffer);
+void kms_status_capture_display(struct capture_buffer *buffer);
+
 int kms_init(int width, int height, int bpp, uint32_t format,
 	     unsigned long count);
 

@@ -55,7 +55,6 @@ int capture_buffer_count;
 struct capture_buffer *capture_buffers;
 
 pthread_t capture_thread[1];
-pthread_mutex_t buffer_mutex[1];
 
 static int
 v4l2_device_find(void)
@@ -196,6 +195,9 @@ v4l2_buffers_alloc(int width, int height, int pitch, int plane_size,
 
 		capture_buffers[i].v4l2_fourcc = fourcc;
 		capture_buffers[i].drm_format = drm_format;
+
+		pthread_mutex_init(capture_buffers[i].reference_count_mutex,
+				   NULL);
 	}
 
 	return 0;
@@ -440,9 +442,8 @@ capture_buffer_test_empty(int frame,
 }
 
 static void
-capture_buffer_test(int index, int frame)
+capture_buffer_test(struct capture_buffer *buffer, int frame)
 {
-	struct capture_buffer *buffer = &capture_buffers[index];
 	uint8_t *red, *green, *blue;
 	int center_x = (capture_width >> 1);
 	int center_y = (capture_height >> 1);
@@ -452,7 +453,7 @@ capture_buffer_test(int index, int frame)
 	green = buffer->planes[1].map;
 	red = buffer->planes[2].map;
 
-	printf("\rTesting frame %4d (%2d):", frame, index);
+	printf("\rTesting frame %4d (%2d):", frame, buffer->index);
 
 	/* Test 2x2 pixels in the upper left corner */
 	capture_buffer_test_frame(frame, red, green, blue, 0, 0);
@@ -584,6 +585,52 @@ capture_buffer_test(int index, int frame)
 				  capture_width - 1, center_y + 1);
 }
 
+int
+capture_buffer_display_release(struct capture_buffer *buffer)
+{
+	pthread_mutex_lock(buffer->reference_count_mutex);
+
+	if (buffer->reference_count <= 0) {
+		fprintf(stderr, "%s(%d): Error: reference count <= 0\n",
+			__func__, buffer->index);
+		buffer->reference_count = 0;
+	} else
+		buffer->reference_count--;
+
+	if (!buffer->reference_count)
+		v4l2_buffer_queue(buffer->index);
+
+	pthread_mutex_unlock(buffer->reference_count_mutex);
+
+	return 0;
+}
+
+static int
+capture_buffer_display(struct capture_buffer *buffer, int frame)
+{
+	pthread_mutex_lock(buffer->reference_count_mutex);
+
+	if (buffer->reference_count)
+		fprintf(stderr, "%s(%d): Error: reference count = %d\n",
+			__func__, buffer->index, buffer->reference_count);
+
+	/*
+	 * Claim all users at once, and avoid one returning too soon and
+	 * prematurely releasing.
+	 */
+	buffer->reference_count = 3;
+
+	pthread_mutex_unlock(buffer->reference_count_mutex);
+
+	kms_projector_capture_display(buffer);
+	kms_status_capture_display(buffer);
+
+	capture_buffer_test(buffer, frame);
+	capture_buffer_display_release(buffer);
+
+	return 0;
+}
+
 static void *
 capture_thread_handler(void *arg)
 {
@@ -624,27 +671,17 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	for (i = 0; i < count; i++) {
+		struct capture_buffer *buffer;
 		int index = v4l2_buffer_dequeue();
 
 		if (index < 0)
 			return NULL;
 
-
-		ret = pthread_mutex_lock(buffer_mutex);
-		if (ret)
-			fprintf(stderr, "%s: error locking mutex: %s\n",
-				__func__, strerror(ret));
-
-		/* frame 0 starts at a random line anyway */
-		if (i)
-			capture_buffer_test(index, i);
-
-		v4l2_buffer_queue(index);
-
-		ret = pthread_mutex_unlock(buffer_mutex);
-		if (ret)
-			fprintf(stderr, "%s: error unlocking mutex: %s\n",
-				__func__, strerror(ret));
+		/* frame 0 starts at a random line anyway, so skip it */
+		if (i) {
+			buffer = &capture_buffers[index];
+			capture_buffer_display(buffer, i);
+		}
 	}
 
 	printf("\nCaptured %d buffers.\n", i);
@@ -657,20 +694,10 @@ capture_init(unsigned long count)
 {
 	int ret;
 
-	pthread_mutex_init(buffer_mutex, NULL);
-
 	ret = pthread_create(capture_thread, NULL, capture_thread_handler,
 			     (void *) count);
 	if (ret)
 		fprintf(stderr, "%s() failed: %s\n", __func__, strerror(ret));
 
 	return 0;
-}
-
-void
-capture_destroy(void)
-{
-	/* do we actually want to clean up anything, or do we just exit()? */
-
-	pthread_mutex_destroy(buffer_mutex);
 }

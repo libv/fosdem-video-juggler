@@ -113,6 +113,23 @@ struct kms_status {
 	 * should be disabled
 	 */
 	struct kms_plane *plane_disable;
+
+	pthread_mutex_t capture_buffer_mutex[1];
+	/*
+	 * This is the buffer that is currently being shown. It will be
+	 * released as soon as the next buffer is shown using atomic modeset
+	 * commit.
+	 */
+	struct capture_buffer *capture_buffer_current;
+	/*
+	 * This is the buffer that our blocking atomic modeset is about to
+	 * show.
+	 */
+	struct capture_buffer *capture_buffer_next;
+	/*
+	 * This is the upcoming buffer that was last queued by capture.
+	 */
+	struct capture_buffer *capture_buffer_new;
 };
 static struct kms_status *kms_status;
 
@@ -135,6 +152,23 @@ struct kms_projector {
 	 * should be disabled
 	 */
 	struct kms_plane *plane_disable;
+
+	pthread_mutex_t capture_buffer_mutex[1];
+	/*
+	 * This is the buffer that is currently being shown. It will be
+	 * released as soon as the next buffer is shown using atomic modeset
+	 * commit.
+	 */
+	struct capture_buffer *capture_buffer_current;
+	/*
+	 * This is the buffer that our blocking atomic modeset is about to
+	 * show.
+	 */
+	struct capture_buffer *capture_buffer_next;
+	/*
+	 * This is the upcoming buffer that was last queued by capture.
+	 */
+	struct capture_buffer *capture_buffer_new;
 };
 static struct kms_projector *kms_projector;
 
@@ -268,7 +302,7 @@ kms_connector_id_get(uint32_t type, uint32_t *id_ret)
 	}
 
 	/* First, scan through our connectors. */
-        for (i = 0; i < resources->count_connectors; i++) {
+	for (i = 0; i < resources->count_connectors; i++) {
 		connector_id = resources->connectors[i];
 
 		connector = drmModeGetConnector(kms_fd, connector_id);
@@ -1051,6 +1085,8 @@ kms_projector_init(void)
 	if (!projector)
 		return NULL;
 
+	pthread_mutex_init(projector->capture_buffer_mutex, NULL);
+
 	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_HDMIA,
 				   &projector->connector_id);
 	if (ret)
@@ -1286,6 +1322,8 @@ kms_status_init(void)
 	if (!status)
 		return NULL;
 
+	pthread_mutex_init(status->capture_buffer_mutex, NULL);
+
 	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_DPI,
 				   &status->connector_id);
 	if (ret)
@@ -1485,6 +1523,22 @@ kms_projector_thread_handler(void *arg)
 	return NULL;
 }
 
+void
+kms_projector_capture_display(struct capture_buffer *buffer)
+{
+	struct capture_buffer *old;
+
+	pthread_mutex_lock(kms_projector->capture_buffer_mutex);
+
+	old = kms_projector->capture_buffer_new;
+	kms_projector->capture_buffer_new = buffer;
+
+	pthread_mutex_unlock(kms_projector->capture_buffer_mutex);
+
+	if (old)
+		capture_buffer_display_release(old);
+}
+
 static void *
 kms_status_thread_handler(void *arg)
 {
@@ -1525,6 +1579,23 @@ kms_status_thread_handler(void *arg)
 	printf("%s: done!\n", __func__);
 
 	return NULL;
+}
+
+void
+kms_status_capture_display(struct capture_buffer *buffer)
+{
+	struct capture_buffer *old;
+
+	pthread_mutex_lock(kms_status->capture_buffer_mutex);
+
+	old = kms_status->capture_buffer_new;
+
+	kms_status->capture_buffer_new = buffer;
+
+	pthread_mutex_unlock(kms_status->capture_buffer_mutex);
+
+	if (old)
+		capture_buffer_display_release(old);
 }
 
 int

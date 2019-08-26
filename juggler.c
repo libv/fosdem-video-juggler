@@ -20,6 +20,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include <drm_fourcc.h>
 

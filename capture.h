@@ -39,9 +39,13 @@ struct capture_buffer {
 		int export_fd;
 		uint32_t prime_handle;
 	} planes[3];
+
+	pthread_mutex_t reference_count_mutex[1];
+	int reference_count;
 };
 
+int capture_buffer_display_release(struct capture_buffer *buffer);
+
 int capture_init(unsigned long count);
-void capture_destroy(void);
 
 #endif /* _HAVE_CAPTURE_H_ */
