@@ -45,7 +45,7 @@ static unsigned long kms_frame_count;
 pthread_t kms_projector_thread[1];
 pthread_t kms_status_thread[1];
 
-struct buffer {
+struct kms_buffer {
 	int width;
 	int height;
 	uint32_t format;
@@ -98,10 +98,10 @@ struct kms_status {
 	struct kms_plane *capture_yuv;
 
 	struct kms_plane *text;
-	struct buffer *text_buffer;
+	struct kms_buffer *text_buffer;
 
 	struct kms_plane *logo;
-	struct buffer *logo_buffer;
+	struct kms_buffer *logo_buffer;
 
 	/*
 	 * it could be that the primary plane is not used by us, and
@@ -747,7 +747,7 @@ kms_projector_planes_get(struct kms_projector *projector)
 }
 
 static int
-kms_buffer_argb8888_get(struct buffer *buffer,
+kms_buffer_argb8888_get(struct kms_buffer *buffer,
 			int width, int height, uint32_t format)
 {
 	struct drm_mode_create_dumb buffer_create = { 0 };
@@ -869,10 +869,10 @@ kms_buffer_import(struct capture_buffer *buffer)
 /*
  *
  */
-static struct buffer *
+static struct kms_buffer *
 kms_png_read(const char *filename)
 {
-	struct buffer *buffer;
+	struct kms_buffer *buffer;
 	png_image image[1] = {{
 		.version = PNG_IMAGE_VERSION,
 	}};
@@ -890,7 +890,7 @@ kms_png_read(const char *filename)
 	printf("Reading from %s: %dx%d (%dbytes)\n", filename,
 	       image->width, image->height, PNG_IMAGE_SIZE(*image));
 
-	buffer = calloc(1, sizeof(struct buffer));
+	buffer = calloc(1, sizeof(struct kms_buffer));
 
 	ret = kms_buffer_argb8888_get(buffer, image->width, image->height,
 				      DRM_FORMAT_ARGB8888);
@@ -1130,7 +1130,7 @@ static void
 kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
 {
 	struct kms_plane *plane = status->text;
-	struct buffer *buffer = status->text_buffer;
+	struct kms_buffer *buffer = status->text_buffer;
 
 	if (!plane->active) {
 		int x, y, w, h;
@@ -1182,7 +1182,7 @@ static void
 kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
 {
 	struct kms_plane *plane = status->logo;
-	struct buffer *buffer = status->logo_buffer;
+	struct kms_buffer *buffer = status->logo_buffer;
 
 	if (!plane->active) {
 		int x, y, w, h;
