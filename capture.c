@@ -225,7 +225,51 @@ v4l2_buffers_mmap(void)
 			return ret;
 	}
 
-	printf("MMapped %d buffers.\n", i);
+	return 0;
+}
+
+static int
+v4l2_buffer_export(int index, struct capture_buffer *buffer)
+{
+	struct v4l2_exportbuffer export[1] = {
+		{
+			.index = buffer->index,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+			.flags = O_RDONLY,
+		},
+	};
+	int i, ret;
+
+	for (i = 0; i < 3; i++) {
+		export->plane = i;
+
+		ret = ioctl(capture_fd, VIDIOC_EXPBUF, export);
+		if (ret) {
+			fprintf(stderr, "%s: Error: ioctl(VIDIOC_EXPBUF) on"
+				" %d.%d failed: %s\n",
+				__func__, buffer->index, i, strerror(errno));
+			return ret;
+		}
+
+		buffer->planes[i].export_fd = export->fd;
+
+		printf("Exported buffer %02d[%d] to %d.\n",
+		       buffer->index, i, export->fd);
+	}
+
+	return 0;
+}
+
+static int
+v4l2_buffers_export(void)
+{
+	int ret, i;
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		ret = v4l2_buffer_export(i, &capture_buffers[i]);
+		if (ret)
+			return ret;
+	}
 
 	return 0;
 }
@@ -516,6 +560,10 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	ret = v4l2_buffers_mmap();
+	if (ret)
+		return NULL;
+
+	ret = v4l2_buffers_export();
 	if (ret)
 		return NULL;
 
