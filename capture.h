@@ -21,6 +21,16 @@
 struct capture_buffer {
 	int index;
 
+	int width;
+	int height;
+
+	/* we assume that all sizes and strides are the same for all planes. */
+	size_t stride;
+	size_t plane_size;
+
+	uint32_t v4l2_fourcc;
+	uint32_t drm_format;
+
 	struct plane {
 		off_t offset;
 		void *map;
