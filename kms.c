@@ -35,6 +35,7 @@
 
 #include "juggler.h"
 #include "kms.h"
+#include "capture.h"
 
 pthread_t kms_projector_thread[1];
 pthread_t kms_status_thread[1];
@@ -158,6 +159,9 @@ struct kms {
 	int crtc_index_count;
 };
 
+/* so that our capture side can use this separately. */
+int kms_fd;
+
 static int
 kms_fd_init(struct kms *kms, const char *driver_name)
 {
@@ -184,6 +188,8 @@ kms_fd_init(struct kms *kms, const char *driver_name)
 			strerror(errno));
 		return ret;
 	}
+
+	kms_fd = kms->kms_fd;
 
 	return 0;
 }
@@ -882,6 +888,54 @@ kms_buffer_argb8888_get(int kms_fd, struct buffer *buffer,
 	}
 
 	printf("Created FB %02u.\n", buffer->fb_id);
+
+	return 0;
+}
+
+/*
+ *
+ */
+int
+kms_buffer_import(struct capture_buffer *buffer)
+{
+	uint32_t handles[4] = { 0 };
+	uint32_t pitches[4] = { 0 };
+	uint32_t offsets[4] = { 0 };
+	int ret, i;
+
+	for (i = 0; i < 3; i++) {
+		struct drm_prime_handle prime[1] = {{
+				.fd = buffer->planes[i].export_fd,
+			}};
+
+		ret = drmIoctl(kms_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, prime);
+		if (ret) {
+			fprintf(stderr, "%s: drmIoctl(PRIME_FD_TO_HANDLE, %d) "
+				"failed: %s\n", __func__,
+				buffer->planes[i].export_fd, strerror(errno));
+			return ret;
+		}
+
+		buffer->planes[i].prime_handle = prime->handle;
+		handles[i] = prime->handle;
+		pitches[i] = buffer->pitch;
+	}
+
+	printf("%s(%d): prime handles: %02X, %02X, %02X\n",
+	       __func__, buffer->index, buffer->planes[0].prime_handle,
+	       buffer->planes[1].prime_handle, buffer->planes[2].prime_handle);
+
+	ret = drmModeAddFB2(kms_fd, buffer->width, buffer->height,
+			    buffer->drm_format, handles, pitches, offsets,
+			    &buffer->kms_fb_id, 0);
+	if (ret) {
+		fprintf(stderr, "%s(%d): failed to create fb: %s\n",
+			__func__, buffer->index, strerror(errno));
+		return -errno;
+	}
+
+	printf("%s(%d): FB %02u.\n",
+	       __func__, buffer->index, buffer->kms_fb_id);
 
 	return 0;
 }

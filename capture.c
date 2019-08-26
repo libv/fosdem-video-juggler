@@ -36,6 +36,7 @@
 #include <drm_fourcc.h>
 
 #include "capture.h"
+#include "kms.h"
 
 int capture_fd = -1;
 
@@ -44,7 +45,7 @@ char *v4l2_device_card_name = "sun4i_csi1";
 enum v4l2_buf_type capture_type = -1;
 int capture_width;
 int capture_height;
-size_t capture_stride;
+size_t capture_pitch;
 size_t capture_plane_size;
 uint32_t capture_fourcc;
 
@@ -127,13 +128,13 @@ v4l2_format_get(void)
 
 	capture_width = pixel->width;
 	capture_height = pixel->height;
-	capture_stride = pixel->plane_fmt[0].bytesperline;
+	capture_pitch = pixel->plane_fmt[0].bytesperline;
 	capture_plane_size = pixel->plane_fmt[0].sizeimage;
 	capture_fourcc = pixel->pixelformat;
 
 	printf("Format is %dx%d (3x%dbytes, %dkB) %C%C%C%C\n",
 	       capture_width, capture_height,
-	       (int) capture_stride,
+	       (int) capture_pitch,
 	       (int) (capture_plane_size >> 10),
 	       (capture_fourcc >> 0) & 0xFF, (capture_fourcc >> 8) & 0xFF,
 	       (capture_fourcc >> 16) & 0xFF, (capture_fourcc >> 24) & 0xFF);
@@ -145,8 +146,8 @@ v4l2_format_get(void)
  * Again, assuming that all planes have the same size.
  */
 static int
-v4l2_buffers_alloc(int width, int height, int stride,
-		   uint32_t fourcc, int plane_size)
+v4l2_buffers_alloc(int width, int height, int pitch, int plane_size,
+		   uint32_t fourcc)
 {
 	struct v4l2_requestbuffers request[1] = {{
 			.count = 16,
@@ -190,7 +191,7 @@ v4l2_buffers_alloc(int width, int height, int stride,
 		capture_buffers[i].width = width;
 		capture_buffers[i].height = height;
 
-		capture_buffers[i].stride = stride;
+		capture_buffers[i].pitch = pitch;
 		capture_buffers[i].plane_size = plane_size;
 
 		capture_buffers[i].v4l2_fourcc = fourcc;
@@ -295,6 +296,20 @@ v4l2_buffers_export(void)
 
 	for (i = 0; i < capture_buffer_count; i++) {
 		ret = v4l2_buffer_export(i, &capture_buffers[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int
+v4l2_buffers_kms_import(void)
+{
+	int ret, i;
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		ret = kms_buffer_import(&capture_buffers[i]);
 		if (ret)
 			return ret;
 	}
@@ -583,7 +598,7 @@ capture_thread_handler(void *arg)
 	if (ret)
 		return NULL;
 
-	ret = v4l2_buffers_alloc(capture_width, capture_height, capture_stride,
+	ret = v4l2_buffers_alloc(capture_width, capture_height, capture_pitch,
 				 capture_plane_size, capture_fourcc);
 	if (ret)
 		return NULL;
@@ -593,6 +608,10 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	ret = v4l2_buffers_export();
+	if (ret)
+		return NULL;
+
+	ret = v4l2_buffers_kms_import();
 	if (ret)
 		return NULL;
 

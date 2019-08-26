@@ -24,17 +24,20 @@ struct capture_buffer {
 	int width;
 	int height;
 
-	/* we assume that all sizes and strides are the same for all planes. */
-	size_t stride;
+	/* we assume that all sizes and pitches are the same for all planes. */
+	size_t pitch;
 	size_t plane_size;
 
 	uint32_t v4l2_fourcc;
 	uint32_t drm_format;
 
+	uint32_t kms_fb_id;
+
 	struct plane {
 		off_t offset;
 		void *map;
 		int export_fd;
+		uint32_t prime_handle;
 	} planes[3];
 };
 

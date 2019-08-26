@@ -18,6 +18,10 @@
 #ifndef _HAVE_KMS_H_
 #define _HAVE_KMS_H_ 1
 
+struct capture_buffer;
+
+int kms_buffer_import(struct capture_buffer *buffer);
+
 int kms_init(int width, int height, int bpp, uint32_t format,
 	     unsigned long count);
 
