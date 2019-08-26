@@ -49,11 +49,7 @@ size_t capture_plane_size;
 int capture_frame_offset = -1;
 
 int capture_buffer_count;
-struct capture_buffer {
-	int index;
-	off_t offset[3];
-	void *map[3];
-} *capture_buffers;
+struct capture_buffer *capture_buffers;
 
 pthread_t capture_thread[1];
 pthread_mutex_t buffer_mutex[1];
@@ -211,8 +207,8 @@ v4l2_buffer_mmap(int index, struct capture_buffer *buffer)
 		printf("Mapped buffer %02d[%d] @ 0x%08lX to %p.\n",
 		       buffer->index, i, offset, map);
 
-		buffer->offset[i] = offset;
-		buffer->map[i] = map;
+		buffer->planes[i].offset = offset;
+		buffer->planes[i].map = map;
 	}
 
 	return 0;
@@ -365,9 +361,9 @@ capture_buffer_test(int index, int frame)
 	int center_y = (capture_height >> 1);
 
 	/* we have swapped blue and red channels on our system */
-	blue = buffer->map[0];
-	green = buffer->map[1];
-	red = buffer->map[2];
+	blue = buffer->planes[0].map;
+	green = buffer->planes[1].map;
+	red = buffer->planes[2].map;
 
 	printf("\rTesting frame %4d (%2d):", frame, index);
 

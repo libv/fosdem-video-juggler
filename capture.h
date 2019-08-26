@@ -18,6 +18,16 @@
 #ifndef _HAVE_CAPTURE_H_
 #define _HAVE_CAPTURE_H_ 1
 
+struct capture_buffer {
+	int index;
+
+	struct plane {
+		off_t offset;
+		void *map;
+		int export_fd;
+	} planes[3];
+};
+
 int capture_init(unsigned long count);
 void capture_destroy(void);
 
