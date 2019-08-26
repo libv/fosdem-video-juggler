@@ -1006,10 +1006,13 @@ kms_png_read(const char *filename)
  */
 static void
 kms_projector_capture_set(struct kms_projector *projector,
-			  struct buffer *buffer,
+			  struct capture_buffer *buffer,
 			  drmModeAtomicReqPtr request)
 {
 	struct kms_plane *plane = projector->capture_scaling;
+
+	if (!buffer)
+		return;
 
 	if (!plane->active) {
 		int x, y, w, h;
@@ -1069,7 +1072,7 @@ kms_projector_capture_set(struct kms_projector *projector,
 	/* actual flip. */
 	drmModeAtomicAddProperty(request, plane->plane_id,
 				 plane->property_fb_id,
-				 buffer->fb_id);
+				 buffer->kms_fb_id);
 }
 
 /*
@@ -1121,10 +1124,14 @@ kms_projector_init(void)
  * Show input buffer on the status lcd, in the top right corner.
  */
 static void
-kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
+kms_status_capture_set(struct kms_status *status,
+		       struct capture_buffer *buffer,
 		       drmModeAtomicReqPtr request)
 {
 	struct kms_plane *plane = status->capture_scaling;
+
+	if (!buffer)
+		return;
 
 	if (!plane->active) {
 		int x, y, w, h;
@@ -1198,7 +1205,7 @@ kms_status_capture_set(struct kms_status *status, struct buffer *buffer,
 	/* actual flip. */
 	drmModeAtomicAddProperty(request, plane->plane_id,
 				 plane->property_fb_id,
-				 buffer->fb_id);
+				 buffer->kms_fb_id);
 }
 
 /*
@@ -1396,7 +1403,7 @@ kms_plane_disable(struct kms_plane *kms_plane, drmModeAtomicReqPtr request)
 
 static int
 kms_projector_frame_update(struct kms_projector *projector,
-			   struct buffer *buffer, int frame)
+			   struct capture_buffer *buffer, int frame)
 {
 	drmModeAtomicReqPtr request;
 	int ret;
@@ -1414,8 +1421,8 @@ kms_projector_frame_update(struct kms_projector *projector,
 	drmModeAtomicFree(request);
 
 	if (ret) {
-		fprintf(stderr, "%s: failed to show fb %02u: %s\n",
-			__func__, buffer->fb_id, strerror(errno));
+		fprintf(stderr, "%s: failed to show frame %d: %s\n",
+			__func__, frame, strerror(errno));
 		ret = -errno;
 	}
 
@@ -1424,7 +1431,7 @@ kms_projector_frame_update(struct kms_projector *projector,
 
 static int
 kms_status_frame_update(struct kms_status *status,
-			struct buffer *buffer, int frame)
+			struct capture_buffer *buffer, int frame)
 {
 	drmModeAtomicReqPtr request;
 	int ret;
@@ -1444,8 +1451,8 @@ kms_status_frame_update(struct kms_status *status,
 	drmModeAtomicFree(request);
 
 	if (ret) {
-		fprintf(stderr, "%s: failed to show fb %02u: %s\n",
-			__func__, buffer->fb_id, strerror(errno));
+		fprintf(stderr, "%s: failed to show frame %d: %s\n",
+			__func__, frame, strerror(errno));
 		ret = -errno;
 	}
 
@@ -1487,34 +1494,14 @@ kms_projector_thread_handler(void *arg)
 	struct kms_projector *projector = (struct kms_projector *) arg;
 	int ret, i;
 
-	if (kms_test_card) {
-		for (i = 0; i < kms_frame_count; i++) {
-			ret = kms_projector_frame_update(projector,
-							 kms_test_card, i);
-			if (ret)
-				return NULL;
-		}
-	} else {
-		for (i = 0; i < kms_frame_count;) {
-			ret = kms_projector_frame_update(projector,
-							 kms_buffers_planar[0], i);
-			if (ret)
-				return NULL;
-			i++;
-
-			ret = kms_projector_frame_update(projector,
-							 kms_buffers_planar[1], i);
-			if (ret)
-				return NULL;
-			i++;
-
-			ret = kms_projector_frame_update(projector,
-							 kms_buffers_planar[2], i);
-			if (ret)
-				return NULL;
-			i++;
-		}
+	for (i = 0; i < kms_frame_count; i++) {
+		ret = kms_projector_frame_update(projector,
+						 projector->capture_buffer_next,
+						 i);
+		if (ret)
+			return NULL;
 	}
+
 	printf("%s: done!\n", __func__);
 
 	return NULL;
@@ -1543,34 +1530,14 @@ kms_status_thread_handler(void *arg)
 	struct kms_status *status = (struct kms_status *) arg;
 	int ret, i;
 
-	if (kms_test_card) {
-		for (i = 0; i < kms_frame_count; i++) {
-			ret = kms_status_frame_update(status,
-						      kms_test_card, i);
-			if (ret)
-				return NULL;
-		}
-	} else {
-		for (i = 0; i < kms_frame_count;) {
-			ret = kms_status_frame_update(status,
-						      kms_buffers_planar[0], i);
-			if (ret)
-				return NULL;
-			i++;
-
-			ret = kms_status_frame_update(status,
-						      kms_buffers_planar[1], i);
-			if (ret)
-				return NULL;
-			i++;
-
-			ret = kms_status_frame_update(status,
-						      kms_buffers_planar[2], i);
-			if (ret)
-				return NULL;
-			i++;
-		}
+	for (i = 0; i < kms_frame_count; i++) {
+		ret = kms_status_frame_update(status,
+					      status->capture_buffer_next,
+					      i);
+		if (ret)
+			return NULL;
 	}
+
 	printf("%s: done!\n", __func__);
 
 	return NULL;
