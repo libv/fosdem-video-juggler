@@ -50,15 +50,13 @@ struct buffer {
 	int height;
 	uint32_t format;
 
-	struct buffer_plane {
-		uint32_t handle; /* dumb buffer handle */
+	uint32_t handle; /* dumb buffer handle */
 
-		int pitch;
-		size_t size;
+	int pitch;
+	size_t size;
 
-		uint64_t map_offset;
-		void *map;
-	} planes[3];
+	uint64_t map_offset;
+	void *map;
 
 	uint32_t fb_id;
 };
@@ -754,7 +752,6 @@ kms_buffer_argb8888_get(struct buffer *buffer,
 {
 	struct drm_mode_create_dumb buffer_create = { 0 };
 	struct drm_mode_map_dumb buffer_map = { 0 };
-	struct buffer_plane *plane = &buffer->planes[0];
 	uint32_t handles[4] = { 0 };
 	uint32_t pitches[4] = { 0 };
 	uint32_t offsets[4] = { 0 };
@@ -774,14 +771,14 @@ kms_buffer_argb8888_get(struct buffer *buffer,
 		return ret;
 	}
 
-	plane->handle = buffer_create.handle;
-	plane->size = buffer_create.size;
-	plane->pitch = buffer_create.pitch;
-	printf("buffer_plane: Created buffer %dx%d@%dbpp: "
-	       "%02u (%tdbytes)\n", buffer->width, buffer->height,
-	       buffer_create.bpp, plane->handle, plane->size);
+	buffer->handle = buffer_create.handle;
+	buffer->size = buffer_create.size;
+	buffer->pitch = buffer_create.pitch;
+	printf("%s(): Created buffer %dx%d@%dbpp: %02u (%tdbytes)\n",
+	       __func__, buffer->width, buffer->height,
+	       buffer_create.bpp, buffer->handle, buffer->size);
 
-	buffer_map.handle = plane->handle;
+	buffer_map.handle = buffer->handle;
 	ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer_map);
 	if (ret) {
 		fprintf(stderr, "%s: failed to map buffer: %s\n",
@@ -789,23 +786,23 @@ kms_buffer_argb8888_get(struct buffer *buffer,
 		return -errno;
 	}
 
-	plane->map_offset = buffer_map.offset;
-	printf("buffer_plane: Mapped buffer %02u at offset 0x%jX\n",
-	       plane->handle, plane->map_offset);
+	buffer->map_offset = buffer_map.offset;
+	printf("%s(): Mapped buffer %02u at offset 0x%jX\n",
+	       __func__, buffer->handle, buffer->map_offset);
 
-	plane->map = mmap(0, plane->size, PROT_READ | PROT_WRITE,
-			  MAP_SHARED, kms_fd, plane->map_offset);
-	if (plane->map == MAP_FAILED) {
+	buffer->map = mmap(0, buffer->size, PROT_READ | PROT_WRITE,
+			  MAP_SHARED, kms_fd, buffer->map_offset);
+	if (buffer->map == MAP_FAILED) {
 		fprintf(stderr, "%s: failed to mmap buffer: %s\n",
 			__func__, strerror(errno));
 		return -errno;
 	}
 
-	printf("buffer_plane: MMapped buffer %02u to %p\n",
-	       plane->handle, plane->map);
+	printf("%s(): MMapped buffer %02u to %p\n",
+	       __func__, buffer->handle, buffer->map);
 
-	handles[0] = plane->handle;
-	pitches[0] = plane->pitch;
+	handles[0] = buffer->handle;
+	pitches[0] = buffer->pitch;
 
 	ret = drmModeAddFB2(kms_fd, buffer->width, buffer->height,
 			    buffer->format, handles, pitches, offsets,
@@ -905,8 +902,7 @@ kms_png_read(const char *filename)
 		return NULL;
 	}
 
-	ret = png_image_finish_read(image, NULL, buffer->planes[0].map, 0,
-				    NULL);
+	ret = png_image_finish_read(image, NULL, buffer->map, 0, NULL);
 	if (ret != 1) {
 		fprintf(stderr, "%s(): failed to read png for %s: %s\n",
 			__func__, filename, image->message);
