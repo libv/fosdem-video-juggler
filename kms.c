@@ -114,6 +114,7 @@ struct kms_status {
 	 */
 	struct kms_plane *plane_disable;
 };
+static struct kms_status *kms_status;
 
 struct kms_projector {
 	bool connected;
@@ -135,11 +136,7 @@ struct kms_projector {
 	 */
 	struct kms_plane *plane_disable;
 };
-
-struct kms {
-	struct kms_status status[1];
-	struct kms_projector projector[1];
-};
+static struct kms_projector *kms_projector;
 
 static int
 kms_fd_init(const char *driver_name)
@@ -1044,39 +1041,44 @@ kms_projector_capture_set(struct kms_projector *projector,
 /*
  * HDMI or VGA used for the projector.
  */
-static int
-kms_projector_init(struct kms_projector *projector)
+static struct kms_projector *
+kms_projector_init(void)
 {
+	struct kms_projector *projector;
 	int ret;
+
+	projector = calloc(1, sizeof(struct kms_projector));
+	if (!projector)
+		return NULL;
 
 	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_HDMIA,
 				   &projector->connector_id);
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = kms_connection_check(projector->connector_id,
 				   &projector->connected,
 				   &projector->encoder_id);
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = kms_crtc_id_get(projector->encoder_id,
 			      &projector->crtc_id, &projector->mode_ok,
 			      &projector->crtc_width, &projector->crtc_height);
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = kms_crtc_index_get(projector->crtc_id);
 	if (ret < 0)
-		return ret;
+		return NULL;
 
 	projector->crtc_index = ret;
 
 	ret = kms_projector_planes_get(projector);
 	if (ret)
-		return ret;
+		return NULL;
 
-	return 0;
+	return projector;
 }
 
 /*
@@ -1274,46 +1276,51 @@ kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
 /*
  * Status LCD.
  */
-static int
-kms_status_init(struct kms_status *status)
+static struct kms_status *
+kms_status_init(void)
 {
+	struct kms_status *status;
 	int ret;
+
+	status = calloc(1, sizeof(struct kms_status));
+	if (!status)
+		return NULL;
 
 	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_DPI,
 				   &status->connector_id);
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = kms_connection_check(status->connector_id,
 				   &status->connected, &status->encoder_id);
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = kms_crtc_id_get(status->encoder_id,
 			      &status->crtc_id, &status->mode_ok,
 			      &status->crtc_width, &status->crtc_height);
 	if (ret)
-		return ret;
+		return NULL;
 
 	ret = kms_crtc_index_get(status->crtc_id);
 	if (ret < 0)
-		return ret;
+		return NULL;
 
 	status->crtc_index = ret;
 
 	ret = kms_status_planes_get(status);
 	if (ret)
-		return ret;
+		return NULL;
 
 	status->text_buffer = kms_png_read("status_text.png");
 	if (!status->text_buffer)
-		return -1;
+		return NULL;
 
 	status->logo_buffer = kms_png_read("fosdem_logo.png");
 	if (!status->logo_buffer)
-		return -1;
+		return NULL;
 
-	return 0;
+	return status;
 }
 
 /*
@@ -1439,35 +1446,34 @@ kms_buffers_test_create(int width, int height, int bpp, uint32_t format)
 static void *
 kms_projector_thread_handler(void *arg)
 {
-	struct kms_projector *projector = (struct kms_projector *) arg;
 	int ret, i;
 
-	ret = kms_projector_init(projector);
-	if (ret)
+	kms_projector = kms_projector_init();
+	if (!kms_projector)
 		return NULL;
 
 	if (kms_test_card) {
 		for (i = 0; i < kms_frame_count; i++) {
-			ret = kms_projector_frame_update(projector,
-						      kms_test_card, i);
+			ret = kms_projector_frame_update(kms_projector,
+							 kms_test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
 		for (i = 0; i < kms_frame_count;) {
-			ret = kms_projector_frame_update(projector,
+			ret = kms_projector_frame_update(kms_projector,
 							 kms_buffers_planar[0], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_projector_frame_update(projector,
+			ret = kms_projector_frame_update(kms_projector,
 							 kms_buffers_planar[1], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_projector_frame_update(projector,
+			ret = kms_projector_frame_update(kms_projector,
 							 kms_buffers_planar[2], i);
 			if (ret)
 				return NULL;
@@ -1482,35 +1488,34 @@ kms_projector_thread_handler(void *arg)
 static void *
 kms_status_thread_handler(void *arg)
 {
-	struct kms_status *status = (struct kms_status *) arg;
 	int ret, i;
 
-	ret = kms_status_init(status);
-	if (ret)
+	kms_status = kms_status_init();
+	if (!kms_status)
 		return NULL;
 
 	if (kms_test_card) {
 		for (i = 0; i < kms_frame_count; i++) {
-			ret = kms_status_frame_update(status,
+			ret = kms_status_frame_update(kms_status,
 						      kms_test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
 		for (i = 0; i < kms_frame_count;) {
-			ret = kms_status_frame_update(status,
+			ret = kms_status_frame_update(kms_status,
 						      kms_buffers_planar[0], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_status_frame_update(status,
+			ret = kms_status_frame_update(kms_status,
 						      kms_buffers_planar[1], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_status_frame_update(status,
+			ret = kms_status_frame_update(kms_status,
 						      kms_buffers_planar[2], i);
 			if (ret)
 				return NULL;
@@ -1525,10 +1530,7 @@ kms_status_thread_handler(void *arg)
 int
 kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 {
-	struct kms *kms;
 	int ret;
-
-	kms = calloc(1, sizeof(struct kms));
 
 	kms_frame_count = count;
 
@@ -1551,8 +1553,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 #endif
 
 	ret = pthread_create(kms_status_thread, NULL,
-			     kms_status_thread_handler,
-			     (void *) kms->status);
+			     kms_status_thread_handler, NULL);
 	if (ret) {
 		fprintf(stderr, "%s() status thread creation failed: %s\n",
 			__func__, strerror(ret));
@@ -1560,8 +1561,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	}
 
 	ret = pthread_create(kms_projector_thread, NULL,
-			     kms_projector_thread_handler,
-			     (void *) kms->projector);
+			     kms_projector_thread_handler, NULL);
 	if (ret) {
 		fprintf(stderr, "%s() projector thread creation failed: %s\n",
 			__func__, strerror(ret));
