@@ -1484,34 +1484,31 @@ kms_buffers_test_create(int width, int height, int bpp, uint32_t format)
 static void *
 kms_projector_thread_handler(void *arg)
 {
+	struct kms_projector *projector = (struct kms_projector *) arg;
 	int ret, i;
-
-	kms_projector = kms_projector_init();
-	if (!kms_projector)
-		return NULL;
 
 	if (kms_test_card) {
 		for (i = 0; i < kms_frame_count; i++) {
-			ret = kms_projector_frame_update(kms_projector,
+			ret = kms_projector_frame_update(projector,
 							 kms_test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
 		for (i = 0; i < kms_frame_count;) {
-			ret = kms_projector_frame_update(kms_projector,
+			ret = kms_projector_frame_update(projector,
 							 kms_buffers_planar[0], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_projector_frame_update(kms_projector,
+			ret = kms_projector_frame_update(projector,
 							 kms_buffers_planar[1], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_projector_frame_update(kms_projector,
+			ret = kms_projector_frame_update(projector,
 							 kms_buffers_planar[2], i);
 			if (ret)
 				return NULL;
@@ -1526,14 +1523,15 @@ kms_projector_thread_handler(void *arg)
 void
 kms_projector_capture_display(struct capture_buffer *buffer)
 {
+	struct kms_projector *projector = kms_projector;
 	struct capture_buffer *old;
 
-	pthread_mutex_lock(kms_projector->capture_buffer_mutex);
+	pthread_mutex_lock(projector->capture_buffer_mutex);
 
-	old = kms_projector->capture_buffer_new;
-	kms_projector->capture_buffer_new = buffer;
+	old = projector->capture_buffer_new;
+	projector->capture_buffer_new = buffer;
 
-	pthread_mutex_unlock(kms_projector->capture_buffer_mutex);
+	pthread_mutex_unlock(projector->capture_buffer_mutex);
 
 	if (old)
 		capture_buffer_display_release(old);
@@ -1542,34 +1540,31 @@ kms_projector_capture_display(struct capture_buffer *buffer)
 static void *
 kms_status_thread_handler(void *arg)
 {
+	struct kms_status *status = (struct kms_status *) arg;
 	int ret, i;
-
-	kms_status = kms_status_init();
-	if (!kms_status)
-		return NULL;
 
 	if (kms_test_card) {
 		for (i = 0; i < kms_frame_count; i++) {
-			ret = kms_status_frame_update(kms_status,
+			ret = kms_status_frame_update(status,
 						      kms_test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
 		for (i = 0; i < kms_frame_count;) {
-			ret = kms_status_frame_update(kms_status,
+			ret = kms_status_frame_update(status,
 						      kms_buffers_planar[0], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_status_frame_update(kms_status,
+			ret = kms_status_frame_update(status,
 						      kms_buffers_planar[1], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_status_frame_update(kms_status,
+			ret = kms_status_frame_update(status,
 						      kms_buffers_planar[2], i);
 			if (ret)
 				return NULL;
@@ -1584,15 +1579,16 @@ kms_status_thread_handler(void *arg)
 void
 kms_status_capture_display(struct capture_buffer *buffer)
 {
+	struct kms_status *status = kms_status;
 	struct capture_buffer *old;
 
-	pthread_mutex_lock(kms_status->capture_buffer_mutex);
+	pthread_mutex_lock(status->capture_buffer_mutex);
 
-	old = kms_status->capture_buffer_new;
+	old = status->capture_buffer_new;
 
-	kms_status->capture_buffer_new = buffer;
+	status->capture_buffer_new = buffer;
 
-	pthread_mutex_unlock(kms_status->capture_buffer_mutex);
+	pthread_mutex_unlock(status->capture_buffer_mutex);
 
 	if (old)
 		capture_buffer_display_release(old);
@@ -1623,16 +1619,26 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 		return ret;
 #endif
 
+	kms_status = kms_status_init();
+	if (!kms_status)
+		return -1;
+
 	ret = pthread_create(kms_status_thread, NULL,
-			     kms_status_thread_handler, NULL);
+			     kms_status_thread_handler,
+			     (void *) kms_status);
 	if (ret) {
 		fprintf(stderr, "%s() status thread creation failed: %s\n",
 			__func__, strerror(ret));
 		return ret;
 	}
 
+	kms_projector = kms_projector_init();
+	if (!kms_projector)
+		return -1;
+
 	ret = pthread_create(kms_projector_thread, NULL,
-			     kms_projector_thread_handler, NULL);
+			     kms_projector_thread_handler,
+			     (void *) kms_projector);
 	if (ret) {
 		fprintf(stderr, "%s() projector thread creation failed: %s\n",
 			__func__, strerror(ret));
