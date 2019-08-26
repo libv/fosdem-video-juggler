@@ -144,14 +144,6 @@ struct kms {
 
 	struct kms_status status[1];
 	struct kms_projector projector[1];
-
-	/*
-	 * kms is soo clunky, here we track the index position of the
-	 * actual crtc ids.
-	 */
-#define CRTC_INDEX_COUNT_MAX 2
-	uint32_t crtc_index[CRTC_INDEX_COUNT_MAX];
-	int crtc_index_count;
 };
 
 static int
@@ -324,8 +316,12 @@ kms_connector_id_get(struct kms *kms, uint32_t type, uint32_t *id_ret)
  * we need to harvest the order of the crtcs from the main kms
  * resources structure. WTF?
  */
+#define CRTC_INDEX_COUNT_MAX 2
+static uint32_t kms_crtc_index[CRTC_INDEX_COUNT_MAX];
+static int kms_crtc_index_count;
+
 static int
-kms_crtc_indices_get(struct kms *kms)
+kms_crtc_indices_get(void)
 {
 	drmModeRes *resources;
 	int i;
@@ -338,24 +334,24 @@ kms_crtc_indices_get(struct kms *kms)
 	}
 
 	if (resources->count_crtcs > CRTC_INDEX_COUNT_MAX)
-		kms->crtc_index_count = CRTC_INDEX_COUNT_MAX;
+		kms_crtc_index_count = CRTC_INDEX_COUNT_MAX;
 	else
-		kms->crtc_index_count = resources->count_crtcs;
+		kms_crtc_index_count = resources->count_crtcs;
 
-	for (i = 0; i < kms->crtc_index_count; i++)
-		kms->crtc_index[i] = resources->crtcs[i];
+	for (i = 0; i < kms_crtc_index_count; i++)
+		kms_crtc_index[i] = resources->crtcs[i];
 
 	drmModeFreeResources(resources);
 	return 0;
 }
 
 static int
-kms_crtc_index_get(struct kms *kms, uint32_t id)
+kms_crtc_index_get(uint32_t id)
 {
 	int i;
 
-	for (i = 0; i < kms->crtc_index_count; i++)
-		if (kms->crtc_index[i] == id)
+	for (i = 0; i < kms_crtc_index_count; i++)
+		if (kms_crtc_index[i] == id)
 			return i;
 
 	fprintf(stderr, "%s: failed to find crtc %u\n", __func__, id);
@@ -1076,7 +1072,7 @@ kms_projector_init(struct kms *kms)
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_index_get(kms, projector->crtc_id);
+	ret = kms_crtc_index_get(projector->crtc_id);
 	if (ret < 0)
 		return ret;
 
@@ -1306,7 +1302,7 @@ kms_status_init(struct kms *kms)
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_index_get(kms, status->crtc_id);
+	ret = kms_crtc_index_get(status->crtc_id);
 	if (ret < 0)
 		return ret;
 
@@ -1548,7 +1544,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_indices_get(kms);
+	ret = kms_crtc_indices_get();
 	if (ret)
 		return ret;
 
