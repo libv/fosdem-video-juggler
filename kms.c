@@ -63,9 +63,6 @@ struct buffer {
 	uint32_t fb_id;
 };
 
-static struct buffer kms_buffers_planar[3][1];
-static struct buffer *kms_test_card;
-
 struct kms_plane {
 	uint32_t plane_id;
 	bool active;
@@ -752,84 +749,6 @@ kms_projector_planes_get(struct kms_projector *projector)
 }
 
 static int
-kms_buffer_planar_get(struct buffer *buffer,
-		      int width, int height, uint32_t format)
-{
-	uint32_t handles[4] = { 0 };
-	uint32_t pitches[4] = { 0 };
-	uint32_t offsets[4] = { 0 };
-	int ret, i;
-
-	buffer->width = width;
-	buffer->height = height;
-	buffer->format = format;
-
-	for (i = 0; i < 3; i++) {
-		struct drm_mode_create_dumb buffer_create = { 0 };
-		struct drm_mode_map_dumb buffer_map = { 0 };
-		struct buffer_plane *plane = &buffer->planes[i];
-
-		buffer_create.width = width;
-		buffer_create.height = height;
-		buffer_create.bpp = 8;
-		ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_CREATE_DUMB,
-			       &buffer_create);
-		if (ret) {
-			fprintf(stderr, "%s: failed to create buffer: %s\n",
-			__func__, strerror(errno));
-			return ret;
-		}
-
-		plane->handle = buffer_create.handle;
-		plane->size = buffer_create.size;
-		plane->pitch = buffer_create.pitch;
-		printf("buffer_plane %d: Created buffer %dx%d@%dbpp: "
-		       "%02u (%tdbytes)\n", i, buffer->width, buffer->height,
-		       buffer_create.bpp, plane->handle, plane->size);
-
-		buffer_map.handle = plane->handle;
-		ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_MAP_DUMB,
-			       &buffer_map);
-		if (ret) {
-			fprintf(stderr, "%s: failed to map buffer: %s\n",
-				__func__, strerror(errno));
-			return -errno;
-		}
-
-		plane->map_offset = buffer_map.offset;
-		printf("buffer_plane %d: Mapped buffer %02u at offset "
-		       "0x%jX\n", i, plane->handle, plane->map_offset);
-
-		plane->map = mmap(0, plane->size, PROT_READ | PROT_WRITE,
-				   MAP_SHARED, kms_fd, plane->map_offset);
-		if (plane->map == MAP_FAILED) {
-			fprintf(stderr, "%s: failed to mmap buffer: %s\n",
-				__func__, strerror(errno));
-			return -errno;
-		}
-
-		printf("buffer_plane %d: MMapped buffer %02u to %p\n",
-		       i, plane->handle, plane->map);
-
-		handles[i] = plane->handle;
-		pitches[i] = plane->pitch;
-	}
-
-	ret = drmModeAddFB2(kms_fd, buffer->width, buffer->height,
-			    buffer->format, handles, pitches, offsets,
-			    &buffer->fb_id, 0);
-	if (ret) {
-		fprintf(stderr, "%s: failed to create fb: %s\n",
-			__func__, strerror(errno));
-		return -errno;
-	}
-
-	printf("Created FB %02u.\n", buffer->fb_id);
-
-	return 0;
-}
-
-static int
 kms_buffer_argb8888_get(struct buffer *buffer,
 			int width, int height, uint32_t format)
 {
@@ -1459,35 +1378,6 @@ kms_status_frame_update(struct kms_status *status,
 	return ret;
 }
 
-static __maybe_unused int
-kms_buffers_test_create(int width, int height, int bpp, uint32_t format)
-{
-	int ret;
-
-	ret = kms_buffer_planar_get(kms_buffers_planar[0], width, height, format);
-	if (ret)
-		return ret;
-
-	memset(kms_buffers_planar[0]->planes[0].map, 0xFF,
-	       kms_buffers_planar[0]->planes[0].size);
-
-	ret = kms_buffer_planar_get(kms_buffers_planar[1], width, height, format);
-	if (ret)
-		return ret;
-
-	memset(kms_buffers_planar[1]->planes[1].map, 0xFF,
-	       kms_buffers_planar[1]->planes[1].size);
-
-	ret = kms_buffer_planar_get(kms_buffers_planar[2], width, height, format);
-	if (ret)
-		return ret;
-
-	memset(kms_buffers_planar[2]->planes[2].map, 0xFF,
-	       kms_buffers_planar[2]->planes[2].size);
-
-	return 0;
-}
-
 static void *
 kms_projector_thread_handler(void *arg)
 {
@@ -1575,16 +1465,6 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	ret = kms_crtc_indices_get();
 	if (ret)
 		return ret;
-
-#if 0
-	kms_test_card = kms_png_read("PM5644_test_card_FOSDEM.1280x720.png");
-	if (!kms_test_card)
-		return -1;
-#else
-	ret = kms_buffers_test_create(width, height, bpp, format);
-	if (ret)
-		return ret;
-#endif
 
 	kms_status = kms_status_init();
 	if (!kms_status)
