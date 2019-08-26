@@ -65,6 +65,9 @@ struct buffer {
 	uint32_t fb_id;
 };
 
+static struct buffer kms_buffers_planar[3][1];
+static struct buffer *kms_test_card;
+
 struct kms_plane {
 	uint32_t plane_id;
 	bool active;
@@ -136,12 +139,6 @@ struct kms_projector {
 };
 
 struct kms {
-	/* actual buffers */
-	int buffer_count;
-	struct buffer buffers[3][1];
-
-	struct buffer *test_card;
-
 	struct kms_status status[1];
 	struct kms_projector projector[1];
 };
@@ -928,7 +925,7 @@ kms_buffer_import(struct capture_buffer *buffer)
  *
  */
 static struct buffer *
-kms_png_read(struct kms *kms, const char *filename)
+kms_png_read(const char *filename)
 {
 	struct buffer *buffer;
 	png_image image[1] = {{
@@ -1312,11 +1309,11 @@ kms_status_init(struct kms *kms)
 	if (ret)
 		return ret;
 
-	status->text_buffer = kms_png_read(kms, "status_text.png");
+	status->text_buffer = kms_png_read("status_text.png");
 	if (!status->text_buffer)
 		return -1;
 
-	status->logo_buffer = kms_png_read(kms, "fosdem_logo.png");
+	status->logo_buffer = kms_png_read("fosdem_logo.png");
 	if (!status->logo_buffer)
 		return -1;
 
@@ -1415,31 +1412,30 @@ kms_status_frame_update(struct kms_status *status,
 }
 
 static __maybe_unused int
-kms_buffers_test_create(struct kms *kms, int width, int height, int bpp,
-			uint32_t format)
+kms_buffers_test_create(int width, int height, int bpp, uint32_t format)
 {
 	int ret;
 
-	ret = kms_buffer_planar_get(kms->buffers[0], width, height, format);
+	ret = kms_buffer_planar_get(kms_buffers_planar[0], width, height, format);
 	if (ret)
 		return ret;
 
-	memset(kms->buffers[0]->planes[0].map, 0xFF,
-	       kms->buffers[0]->planes[0].size);
+	memset(kms_buffers_planar[0]->planes[0].map, 0xFF,
+	       kms_buffers_planar[0]->planes[0].size);
 
-	ret = kms_buffer_planar_get(kms->buffers[1], width, height, format);
+	ret = kms_buffer_planar_get(kms_buffers_planar[1], width, height, format);
 	if (ret)
 		return ret;
 
-	memset(kms->buffers[1]->planes[1].map, 0xFF,
-	       kms->buffers[1]->planes[1].size);
+	memset(kms_buffers_planar[1]->planes[1].map, 0xFF,
+	       kms_buffers_planar[1]->planes[1].size);
 
-	ret = kms_buffer_planar_get(kms->buffers[2], width, height, format);
+	ret = kms_buffer_planar_get(kms_buffers_planar[2], width, height, format);
 	if (ret)
 		return ret;
 
-	memset(kms->buffers[2]->planes[2].map, 0xFF,
-	       kms->buffers[2]->planes[2].size);
+	memset(kms_buffers_planar[2]->planes[2].map, 0xFF,
+	       kms_buffers_planar[2]->planes[2].size);
 
 	return 0;
 }
@@ -1454,29 +1450,29 @@ kms_projector_thread_handler(void *arg)
 	if (ret)
 		return NULL;
 
-	if (kms->test_card) {
+	if (kms_test_card) {
 		for (i = 0; i < kms_frame_count; i++) {
 			ret = kms_projector_frame_update(kms->projector,
-						      kms->test_card, i);
+						      kms_test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
 		for (i = 0; i < kms_frame_count;) {
 			ret = kms_projector_frame_update(kms->projector,
-							 kms->buffers[0], i);
+							 kms_buffers_planar[0], i);
 			if (ret)
 				return NULL;
 			i++;
 
 			ret = kms_projector_frame_update(kms->projector,
-							 kms->buffers[1], i);
+							 kms_buffers_planar[1], i);
 			if (ret)
 				return NULL;
 			i++;
 
 			ret = kms_projector_frame_update(kms->projector,
-							 kms->buffers[2], i);
+							 kms_buffers_planar[2], i);
 			if (ret)
 				return NULL;
 			i++;
@@ -1497,29 +1493,29 @@ kms_status_thread_handler(void *arg)
 	if (ret)
 		return NULL;
 
-	if (kms->test_card) {
+	if (kms_test_card) {
 		for (i = 0; i < kms_frame_count; i++) {
 			ret = kms_status_frame_update(kms->status,
-						      kms->test_card, i);
+						      kms_test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
 		for (i = 0; i < kms_frame_count;) {
 			ret = kms_status_frame_update(kms->status,
-						      kms->buffers[0], i);
+						      kms_buffers_planar[0], i);
 			if (ret)
 				return NULL;
 			i++;
 
 			ret = kms_status_frame_update(kms->status,
-						      kms->buffers[1], i);
+						      kms_buffers_planar[1], i);
 			if (ret)
 				return NULL;
 			i++;
 
 			ret = kms_status_frame_update(kms->status,
-						      kms->buffers[2], i);
+						      kms_buffers_planar[2], i);
 			if (ret)
 				return NULL;
 			i++;
@@ -1549,12 +1545,11 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 		return ret;
 
 #if 0
-	kms->test_card =
-		kms_png_read(kms, "PM5644_test_card_FOSDEM.1280x720.png");
-	if (!kms->test_card)
+	kms_test_card = kms_png_read("PM5644_test_card_FOSDEM.1280x720.png");
+	if (!kms_test_card)
 		return -1;
 #else
-	ret = kms_buffers_test_create(kms, width, height, bpp, format);
+	ret = kms_buffers_test_create(width, height, bpp, format);
 	if (ret)
 		return ret;
 #endif
