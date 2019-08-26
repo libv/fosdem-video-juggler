@@ -40,6 +40,8 @@
 /* so that our capture side can use this separately. */
 static int kms_fd = -1;
 
+static unsigned long kms_frame_count;
+
 pthread_t kms_projector_thread[1];
 pthread_t kms_status_thread[1];
 
@@ -134,8 +136,6 @@ struct kms_projector {
 };
 
 struct kms {
-	unsigned long count;
-
 	/* actual buffers */
 	int buffer_count;
 	struct buffer buffers[3][1];
@@ -1455,14 +1455,14 @@ kms_projector_thread_handler(void *arg)
 		return NULL;
 
 	if (kms->test_card) {
-		for (i = 0; i < kms->count; i++) {
+		for (i = 0; i < kms_frame_count; i++) {
 			ret = kms_projector_frame_update(kms->projector,
 						      kms->test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
-		for (i = 0; i < kms->count;) {
+		for (i = 0; i < kms_frame_count;) {
 			ret = kms_projector_frame_update(kms->projector,
 							 kms->buffers[0], i);
 			if (ret)
@@ -1498,14 +1498,14 @@ kms_status_thread_handler(void *arg)
 		return NULL;
 
 	if (kms->test_card) {
-		for (i = 0; i < kms->count; i++) {
+		for (i = 0; i < kms_frame_count; i++) {
 			ret = kms_status_frame_update(kms->status,
 						      kms->test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
-		for (i = 0; i < kms->count;) {
+		for (i = 0; i < kms_frame_count;) {
 			ret = kms_status_frame_update(kms->status,
 						      kms->buffers[0], i);
 			if (ret)
@@ -1538,7 +1538,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 
 	kms = calloc(1, sizeof(struct kms));
 
-	kms->count = count;
+	kms_frame_count = count;
 
 	ret = kms_fd_init("sun4i-drm");
 	if (ret)
