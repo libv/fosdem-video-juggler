@@ -37,6 +37,9 @@
 #include "kms.h"
 #include "capture.h"
 
+/* so that our capture side can use this separately. */
+static int kms_fd = -1;
+
 pthread_t kms_projector_thread[1];
 pthread_t kms_status_thread[1];
 
@@ -61,8 +64,6 @@ struct buffer {
 };
 
 struct kms_plane {
-	struct kms *kms;
-
 	uint32_t plane_id;
 	bool active;
 
@@ -85,8 +86,6 @@ struct kms_plane {
 };
 
 struct kms_status {
-	struct kms *kms;
-
 	bool connected;
 	bool mode_ok;
 
@@ -114,8 +113,6 @@ struct kms_status {
 };
 
 struct kms_projector {
-	struct kms *kms;
-
 	bool connected;
 	bool mode_ok;
 
@@ -137,8 +134,6 @@ struct kms_projector {
 };
 
 struct kms {
-	int kms_fd;
-
 	unsigned long count;
 
 	/* actual buffers */
@@ -159,29 +154,26 @@ struct kms {
 	int crtc_index_count;
 };
 
-/* so that our capture side can use this separately. */
-int kms_fd;
-
 static int
-kms_fd_init(struct kms *kms, const char *driver_name)
+kms_fd_init(const char *driver_name)
 {
 	int ret;
 
-	kms->kms_fd = drmOpen(driver_name, NULL);
-	if (kms->kms_fd == -1) {
+	kms_fd = drmOpen(driver_name, NULL);
+	if (kms_fd == -1) {
 		fprintf(stderr, "Error: Failed to open KMS driver %s: %s\n",
 			driver_name, strerror(errno));
 		return errno;
 	}
 
-	ret = drmSetClientCap(kms->kms_fd, DRM_CLIENT_CAP_ATOMIC, 1);
+	ret = drmSetClientCap(kms_fd, DRM_CLIENT_CAP_ATOMIC, 1);
 	if (ret < 0) {
 		fprintf(stderr, "Error: Unable to set DRM_CLIENT_CAP_ATOMIC:"
 			" %s\n", strerror(errno));
 		return ret;
 	}
 
-	ret = drmSetClientCap(kms->kms_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
+	ret = drmSetClientCap(kms_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1);
 	if (ret < 0) {
 		fprintf(stderr, "Error: Unable to set "
 			"DRM_CLIENT_CAP_UNIVERSAL_PLANES: %s\n",
@@ -189,7 +181,7 @@ kms_fd_init(struct kms *kms, const char *driver_name)
 		return ret;
 	}
 
-	kms_fd = kms->kms_fd;
+	kms_fd = kms_fd;
 
 	return 0;
 }
@@ -284,7 +276,7 @@ kms_connector_id_get(struct kms *kms, uint32_t type, uint32_t *id_ret)
 	uint32_t connector_id = 0;
 	int i, ret;
 
-	resources = drmModeGetResources(kms->kms_fd);
+	resources = drmModeGetResources(kms_fd);
 	if (!resources) {
 		fprintf(stderr, "%s: Failed to get KMS resources: %s\n",
 			__func__, strerror(errno));
@@ -295,7 +287,7 @@ kms_connector_id_get(struct kms *kms, uint32_t type, uint32_t *id_ret)
         for (i = 0; i < resources->count_connectors; i++) {
 		connector_id = resources->connectors[i];
 
-		connector = drmModeGetConnector(kms->kms_fd, connector_id);
+		connector = drmModeGetConnector(kms_fd, connector_id);
 		if (!connector) {
 			fprintf(stderr,
 				"%s: failed to get Connector %u: %s\n",
@@ -338,7 +330,7 @@ kms_crtc_indices_get(struct kms *kms)
 	drmModeRes *resources;
 	int i;
 
-	resources = drmModeGetResources(kms->kms_fd);
+	resources = drmModeGetResources(kms_fd);
 	if (!resources) {
 		fprintf(stderr, "%s: Failed to get KMS resources: %s\n",
 			__func__, strerror(errno));
@@ -380,7 +372,7 @@ kms_connection_check(struct kms *kms, uint32_t connector_id,
 	drmModeConnector *connector = NULL;
 
 	/* Check whether our connector is connected. */
-	connector = drmModeGetConnector(kms->kms_fd, connector_id);
+	connector = drmModeGetConnector(kms_fd, connector_id);
 	if (!connector) {
 		fprintf(stderr, "%s: failed to get Connector %u: %s\n",
 			__func__, connector_id, strerror(errno));
@@ -405,7 +397,7 @@ kms_crtc_id_get(struct kms *kms, uint32_t encoder_id, uint32_t *crtc_id,
 	drmModeEncoder *encoder;
 	drmModeCrtc *crtc;
 
-	encoder = drmModeGetEncoder(kms->kms_fd, encoder_id);
+	encoder = drmModeGetEncoder(kms_fd, encoder_id);
 	if (!encoder) {
 		fprintf(stderr, "%s: failed to get Encoder %u: %s\n",
 			__func__, encoder_id, strerror(errno));
@@ -415,7 +407,7 @@ kms_crtc_id_get(struct kms *kms, uint32_t encoder_id, uint32_t *crtc_id,
 	*crtc_id = encoder->crtc_id;
 	drmModeFreeEncoder(encoder);
 
-	crtc = drmModeGetCrtc(kms->kms_fd, *crtc_id);
+	crtc = drmModeGetCrtc(kms_fd, *crtc_id);
 	if (!crtc) {
 		fprintf(stderr, "%s: failed to get CRTC %u: %s\n",
 			__func__, *crtc_id, strerror(errno));
@@ -442,13 +434,13 @@ kms_crtc_id_get(struct kms *kms, uint32_t encoder_id, uint32_t *crtc_id,
 }
 
 static struct kms_plane *
-kms_plane_create(struct kms *kms, uint32_t plane_id)
+kms_plane_create(uint32_t plane_id)
 {
 	struct kms_plane *plane;
 	drmModeObjectProperties *properties;
 	int i;
 
-	properties = drmModeObjectGetProperties(kms->kms_fd, plane_id,
+	properties = drmModeObjectGetProperties(kms_fd, plane_id,
 						DRM_MODE_OBJECT_PLANE);
 	if (!properties) {
 		/* yes, if there are no properties, this returns EINVAL */
@@ -465,14 +457,12 @@ kms_plane_create(struct kms *kms, uint32_t plane_id)
 
 	plane = calloc(1, sizeof(struct kms_plane));
 
-	plane->kms = kms;
-
 	plane->plane_id = plane_id;
 
 	for (i = 0; i < (int) properties->count_props; i++) {
 		drmModePropertyRes *property;
 
-		property = drmModeGetProperty(kms->kms_fd,
+		property = drmModeGetProperty(kms_fd,
 					      properties->props[i]);
 		if (!property) {
 			fprintf(stderr, "Failed to get object %u "
@@ -528,12 +518,11 @@ kms_plane_create(struct kms *kms, uint32_t plane_id)
 static int
 kms_status_planes_get(struct kms_status *status)
 {
-	struct kms *kms = status->kms;
 	drmModePlaneRes *resources_plane = NULL;
 	int ret = 0, i;
 
 	/* Get plane resources so we can start sifting through the planes */
-	resources_plane = drmModeGetPlaneResources(kms->kms_fd);
+	resources_plane = drmModeGetPlaneResources(kms_fd);
 	if (!resources_plane) {
 		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
 			__func__);
@@ -549,7 +538,7 @@ kms_status_planes_get(struct kms_status *status)
 		bool used = false;
 		int j;
 
-		plane = drmModeGetPlane(kms->kms_fd, plane_id);
+		plane = drmModeGetPlane(kms_fd, plane_id);
 		if (!plane) {
 			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
 				__func__, plane_id, strerror(errno));
@@ -581,7 +570,7 @@ kms_status_planes_get(struct kms_status *status)
 
 		if (frontend) {
 			status->capture_scaling =
-				kms_plane_create(kms, plane->plane_id);
+				kms_plane_create(plane->plane_id);
 			if (!status->capture_scaling) {
 				ret = -1;
 				goto plane_error;
@@ -589,7 +578,7 @@ kms_status_planes_get(struct kms_status *status)
 			used = true;
 		} else if (yuv) {
 			status->capture_yuv =
-				kms_plane_create(kms, plane->plane_id);
+				kms_plane_create(plane->plane_id);
 			if (!status->capture_yuv) {
 				ret = -1;
 				goto plane_error;
@@ -598,7 +587,7 @@ kms_status_planes_get(struct kms_status *status)
 		} else if (!layer) {
 			if (!status->text) {
 				status->text =
-					kms_plane_create(kms, plane->plane_id);
+					kms_plane_create(plane->plane_id);
 				if (!status->text) {
 					ret = -1;
 					goto plane_error;
@@ -606,7 +595,7 @@ kms_status_planes_get(struct kms_status *status)
 				used = true;
 			} else if (!status->logo) {
 				status->logo =
-					kms_plane_create(kms, plane->plane_id);
+					kms_plane_create(plane->plane_id);
 				if (!status->logo) {
 					ret = -1;
 					goto plane_error;
@@ -618,7 +607,7 @@ kms_status_planes_get(struct kms_status *status)
 		if (plane->fb_id && !used) {
 			if (!status->plane_disable) {
 				status->plane_disable =
-					kms_plane_create(kms, plane->plane_id);
+					kms_plane_create(plane->plane_id);
 				/* if this fails, continue */
 			} else
 				fprintf(stderr, "%s: multiple planes need to "
@@ -649,12 +638,11 @@ kms_status_planes_get(struct kms_status *status)
 static int
 kms_projector_planes_get(struct kms_projector *projector)
 {
-	struct kms *kms = projector->kms;
 	drmModePlaneRes *resources_plane = NULL;
 	int ret = 0, i;
 
 	/* Get plane resources so we can start sifting through the planes */
-	resources_plane = drmModeGetPlaneResources(kms->kms_fd);
+	resources_plane = drmModeGetPlaneResources(kms_fd);
 	if (!resources_plane) {
 		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
 			__func__);
@@ -669,7 +657,7 @@ kms_projector_planes_get(struct kms_projector *projector)
 		bool frontend = false, yuv = false, used = false;
 		int j;
 
-		plane = drmModeGetPlane(kms->kms_fd, plane_id);
+		plane = drmModeGetPlane(kms_fd, plane_id);
 		if (!plane) {
 			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
 				__func__, plane_id, strerror(errno));
@@ -697,7 +685,7 @@ kms_projector_planes_get(struct kms_projector *projector)
 
 		if (frontend) {
 			projector->capture_scaling =
-				kms_plane_create(kms, plane->plane_id);
+				kms_plane_create(plane->plane_id);
 			if (!projector->capture_scaling) {
 				ret = -1;
 				goto plane_error;
@@ -705,7 +693,7 @@ kms_projector_planes_get(struct kms_projector *projector)
 			used = true;
 		} else if (yuv) {
 			projector->capture_yuv =
-				kms_plane_create(kms, plane->plane_id);
+				kms_plane_create(plane->plane_id);
 			if (!projector->capture_yuv) {
 				ret = -1;
 				goto plane_error;
@@ -716,7 +704,7 @@ kms_projector_planes_get(struct kms_projector *projector)
 		if (plane->fb_id && !used) {
 			if (!projector->plane_disable) {
 				projector->plane_disable =
-					kms_plane_create(kms, plane->plane_id);
+					kms_plane_create(plane->plane_id);
 				/* if this fails, continue */
 			} else
 				fprintf(stderr, "%s: multiple planes need to "
@@ -742,7 +730,7 @@ kms_projector_planes_get(struct kms_projector *projector)
 }
 
 static int
-kms_buffer_planar_get(int kms_fd, struct buffer *buffer,
+kms_buffer_planar_get(struct buffer *buffer,
 		      int width, int height, uint32_t format)
 {
 	uint32_t handles[4] = { 0 };
@@ -820,7 +808,7 @@ kms_buffer_planar_get(int kms_fd, struct buffer *buffer,
 }
 
 static int
-kms_buffer_argb8888_get(int kms_fd, struct buffer *buffer,
+kms_buffer_argb8888_get(struct buffer *buffer,
 			int width, int height, uint32_t format)
 {
 	struct drm_mode_create_dumb buffer_create = { 0 };
@@ -966,8 +954,7 @@ kms_png_read(struct kms *kms, const char *filename)
 
 	buffer = calloc(1, sizeof(struct buffer));
 
-	ret = kms_buffer_argb8888_get(kms->kms_fd, buffer,
-				      image->width, image->height,
+	ret = kms_buffer_argb8888_get(buffer, image->width, image->height,
 				      DRM_FORMAT_ARGB8888);
 	if (ret) {
 		fprintf(stderr, "%s(): failed to create buffer for %s\n",
@@ -1071,8 +1058,6 @@ kms_projector_init(struct kms *kms)
 {
 	struct kms_projector *projector = kms->projector;
 	int ret;
-
-	projector->kms = kms;
 
 	ret = kms_connector_id_get(kms, DRM_MODE_CONNECTOR_HDMIA,
 				   &projector->connector_id);
@@ -1305,8 +1290,6 @@ kms_status_init(struct kms *kms)
 	struct kms_status *status = kms->status;
 	int ret;
 
-	status->kms = kms;
-
 	ret = kms_connector_id_get(kms, DRM_MODE_CONNECTOR_DPI,
 				   &status->connector_id);
 	if (ret)
@@ -1391,7 +1374,7 @@ kms_projector_frame_update(struct kms_projector *projector,
 	if (projector->plane_disable && projector->plane_disable->active)
 		kms_plane_disable(projector->plane_disable, request);
 
-	ret = drmModeAtomicCommit(projector->kms->kms_fd, request,
+	ret = drmModeAtomicCommit(kms_fd, request,
 				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
 
 	drmModeAtomicFree(request);
@@ -1421,7 +1404,7 @@ kms_status_frame_update(struct kms_status *status,
 	if (status->plane_disable && status->plane_disable->active)
 		kms_plane_disable(status->plane_disable, request);
 
-	ret = drmModeAtomicCommit(status->kms->kms_fd, request,
+	ret = drmModeAtomicCommit(kms_fd, request,
 				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
 
 	drmModeAtomicFree(request);
@@ -1441,24 +1424,21 @@ kms_buffers_test_create(struct kms *kms, int width, int height, int bpp,
 {
 	int ret;
 
-	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[0],
-				    width, height, format);
+	ret = kms_buffer_planar_get(kms->buffers[0], width, height, format);
 	if (ret)
 		return ret;
 
 	memset(kms->buffers[0]->planes[0].map, 0xFF,
 	       kms->buffers[0]->planes[0].size);
 
-	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[1],
-				    width, height, format);
+	ret = kms_buffer_planar_get(kms->buffers[1], width, height, format);
 	if (ret)
 		return ret;
 
 	memset(kms->buffers[1]->planes[1].map, 0xFF,
 	       kms->buffers[1]->planes[1].size);
 
-	ret = kms_buffer_planar_get(kms->kms_fd, kms->buffers[2],
-				    width, height, format);
+	ret = kms_buffer_planar_get(kms->buffers[2], width, height, format);
 	if (ret)
 		return ret;
 
@@ -1564,7 +1544,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 
 	kms->count = count;
 
-	ret = kms_fd_init(kms, "sun4i-drm");
+	ret = kms_fd_init("sun4i-drm");
 	if (ret)
 		return ret;
 
