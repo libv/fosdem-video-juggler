@@ -45,8 +45,6 @@ static unsigned long kms_frame_count;
 pthread_t kms_projector_thread[1];
 pthread_t kms_status_thread[1];
 
-struct kms;
-
 struct buffer {
 	int width;
 	int height;
@@ -258,7 +256,7 @@ kms_connection_string(drmModeConnection connection)
 }
 
 static int
-kms_connector_id_get(struct kms *kms, uint32_t type, uint32_t *id_ret)
+kms_connector_id_get(uint32_t type, uint32_t *id_ret)
 {
 	drmModeRes *resources;
 	drmModeConnector *connector = NULL;
@@ -359,8 +357,8 @@ kms_crtc_index_get(uint32_t id)
  * DRM/KMS clunk galore.
  */
 static int
-kms_connection_check(struct kms *kms, uint32_t connector_id,
-		     bool *connected, uint32_t *encoder_id)
+kms_connection_check(uint32_t connector_id, bool *connected,
+		     uint32_t *encoder_id)
 {
 	drmModeConnector *connector = NULL;
 
@@ -384,8 +382,8 @@ kms_connection_check(struct kms *kms, uint32_t connector_id,
 }
 
 static int
-kms_crtc_id_get(struct kms *kms, uint32_t encoder_id, uint32_t *crtc_id,
-		bool *ok, int *width, int *height)
+kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
+		int *width, int *height)
 {
 	drmModeEncoder *encoder;
 	drmModeCrtc *crtc;
@@ -1047,23 +1045,22 @@ kms_projector_capture_set(struct kms_projector *projector,
  * HDMI or VGA used for the projector.
  */
 static int
-kms_projector_init(struct kms *kms)
+kms_projector_init(struct kms_projector *projector)
 {
-	struct kms_projector *projector = kms->projector;
 	int ret;
 
-	ret = kms_connector_id_get(kms, DRM_MODE_CONNECTOR_HDMIA,
+	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_HDMIA,
 				   &projector->connector_id);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(kms, projector->connector_id,
+	ret = kms_connection_check(projector->connector_id,
 				   &projector->connected,
 				   &projector->encoder_id);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_id_get(kms, projector->encoder_id,
+	ret = kms_crtc_id_get(projector->encoder_id,
 			      &projector->crtc_id, &projector->mode_ok,
 			      &projector->crtc_width, &projector->crtc_height);
 	if (ret)
@@ -1278,22 +1275,21 @@ kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
  * Status LCD.
  */
 static int
-kms_status_init(struct kms *kms)
+kms_status_init(struct kms_status *status)
 {
-	struct kms_status *status = kms->status;
 	int ret;
 
-	ret = kms_connector_id_get(kms, DRM_MODE_CONNECTOR_DPI,
+	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_DPI,
 				   &status->connector_id);
 	if (ret)
 		return ret;
 
-	ret = kms_connection_check(kms, status->connector_id,
+	ret = kms_connection_check(status->connector_id,
 				   &status->connected, &status->encoder_id);
 	if (ret)
 		return ret;
 
-	ret = kms_crtc_id_get(kms, status->encoder_id,
+	ret = kms_crtc_id_get(status->encoder_id,
 			      &status->crtc_id, &status->mode_ok,
 			      &status->crtc_width, &status->crtc_height);
 	if (ret)
@@ -1443,35 +1439,35 @@ kms_buffers_test_create(int width, int height, int bpp, uint32_t format)
 static void *
 kms_projector_thread_handler(void *arg)
 {
-	struct kms *kms = (struct kms *) arg;
+	struct kms_projector *projector = (struct kms_projector *) arg;
 	int ret, i;
 
-	ret = kms_projector_init(kms);
+	ret = kms_projector_init(projector);
 	if (ret)
 		return NULL;
 
 	if (kms_test_card) {
 		for (i = 0; i < kms_frame_count; i++) {
-			ret = kms_projector_frame_update(kms->projector,
+			ret = kms_projector_frame_update(projector,
 						      kms_test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
 		for (i = 0; i < kms_frame_count;) {
-			ret = kms_projector_frame_update(kms->projector,
+			ret = kms_projector_frame_update(projector,
 							 kms_buffers_planar[0], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_projector_frame_update(kms->projector,
+			ret = kms_projector_frame_update(projector,
 							 kms_buffers_planar[1], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_projector_frame_update(kms->projector,
+			ret = kms_projector_frame_update(projector,
 							 kms_buffers_planar[2], i);
 			if (ret)
 				return NULL;
@@ -1486,35 +1482,35 @@ kms_projector_thread_handler(void *arg)
 static void *
 kms_status_thread_handler(void *arg)
 {
-	struct kms *kms = (struct kms *) arg;
+	struct kms_status *status = (struct kms_status *) arg;
 	int ret, i;
 
-	ret = kms_status_init(kms);
+	ret = kms_status_init(status);
 	if (ret)
 		return NULL;
 
 	if (kms_test_card) {
 		for (i = 0; i < kms_frame_count; i++) {
-			ret = kms_status_frame_update(kms->status,
+			ret = kms_status_frame_update(status,
 						      kms_test_card, i);
 			if (ret)
 				return NULL;
 		}
 	} else {
 		for (i = 0; i < kms_frame_count;) {
-			ret = kms_status_frame_update(kms->status,
+			ret = kms_status_frame_update(status,
 						      kms_buffers_planar[0], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_status_frame_update(kms->status,
+			ret = kms_status_frame_update(status,
 						      kms_buffers_planar[1], i);
 			if (ret)
 				return NULL;
 			i++;
 
-			ret = kms_status_frame_update(kms->status,
+			ret = kms_status_frame_update(status,
 						      kms_buffers_planar[2], i);
 			if (ret)
 				return NULL;
@@ -1556,7 +1552,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 
 	ret = pthread_create(kms_status_thread, NULL,
 			     kms_status_thread_handler,
-			     (void *) kms);
+			     (void *) kms->status);
 	if (ret) {
 		fprintf(stderr, "%s() status thread creation failed: %s\n",
 			__func__, strerror(ret));
@@ -1565,7 +1561,7 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 
 	ret = pthread_create(kms_projector_thread, NULL,
 			     kms_projector_thread_handler,
-			     (void *) kms);
+			     (void *) kms->projector);
 	if (ret) {
 		fprintf(stderr, "%s() projector thread creation failed: %s\n",
 			__func__, strerror(ret));
