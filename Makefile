@@ -32,4 +32,4 @@ clean:
 	        -e '/^$$/ d' -e 's/$$/ :/' < $*.d >> $*.P; \
 	    rm -f $*.d
 
--include $(OBJS:%.o=%.P)
+-include $(juggler_objects:%.o=%.P)
