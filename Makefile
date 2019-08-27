@@ -13,6 +13,7 @@ all: juggler
 juggler_objects = \
 	kms.o \
 	status.o \
+	projector.o \
 	capture.o \
 	juggler.o
 

@@ -39,6 +39,7 @@
 #include "capture.h"
 #include "kms.h"
 #include "status.h"
+#include "projector.h"
 
 int capture_fd = -1;
 
