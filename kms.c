@@ -31,8 +31,6 @@
 
 #include "juggler.h"
 #include "kms.h"
-#include "status.h"
-#include "projector.h"
 #include "capture.h"
 
 /* so that our capture side can use this separately. */
@@ -604,7 +602,7 @@ kms_plane_disable(struct kms_plane *kms_plane, drmModeAtomicReqPtr request)
 }
 
 int
-kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
+kms_init(void)
 {
 	int ret;
 
@@ -613,14 +611,6 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 		return ret;
 
 	ret = kms_crtc_indices_get();
-	if (ret)
-		return ret;
-
-	ret = kms_status_init(count);
-	if (ret)
-		return ret;
-
-	ret = kms_projector_init(count);
 	if (ret)
 		return ret;
 

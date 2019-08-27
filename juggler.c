@@ -17,17 +17,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <inttypes.h>
-#include <string.h>
 #include <errno.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <stdbool.h>
 
-#include <drm_fourcc.h>
-
 #include "juggler.h"
 #include "capture.h"
 #include "kms.h"
+#include "status.h"
+#include "projector.h"
 
 int main(int argc, char *argv[])
 {
@@ -48,7 +47,15 @@ int main(int argc, char *argv[])
 
 	printf("Running for %lu frames.\n", count);
 
-	ret = kms_init(1280, 720, 24, DRM_FORMAT_R8_G8_B8, count);
+	ret = kms_init();
+	if (ret)
+		return ret;
+
+	ret = kms_status_init(count);
+	if (ret)
+		return ret;
+
+	ret = kms_projector_init(count);
 	if (ret)
 		return ret;
 
