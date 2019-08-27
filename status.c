@@ -468,6 +468,11 @@ kms_status_capture_display(struct capture_buffer *buffer)
 	struct kms_status *status = kms_status;
 	struct capture_buffer *old;
 
+	if (!status) {
+		capture_buffer_display_release(buffer);
+		return;
+	}
+
 	pthread_mutex_lock(status->capture_buffer_mutex);
 
 	old = status->capture_buffer_new;

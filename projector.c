@@ -322,6 +322,11 @@ kms_projector_capture_display(struct capture_buffer *buffer)
 	struct kms_projector *projector = kms_projector;
 	struct capture_buffer *old;
 
+	if (!projector) {
+		capture_buffer_display_release(buffer);
+		return;
+	}
+
 	pthread_mutex_lock(projector->capture_buffer_mutex);
 
 	old = projector->capture_buffer_new;
