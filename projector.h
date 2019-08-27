@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2013, 2019 Luc Verhaegen <libv@skynet.be>
+ * Copyright (c) 2019 Luc Verhaegen <libv@skynet.be>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
