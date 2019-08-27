@@ -21,6 +21,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <stdbool.h>
 
 #include <drm_fourcc.h>
 

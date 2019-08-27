@@ -35,98 +35,15 @@
 
 #include "juggler.h"
 #include "kms.h"
+#include "status.h"
 #include "capture.h"
 
 /* so that our capture side can use this separately. */
-static int kms_fd = -1;
+int kms_fd = -1;
 
 static unsigned long kms_frame_count;
 
 pthread_t kms_projector_thread[1];
-pthread_t kms_status_thread[1];
-
-struct kms_buffer {
-	int width;
-	int height;
-	uint32_t format;
-
-	uint32_t handle; /* dumb buffer handle */
-
-	int pitch;
-	size_t size;
-
-	uint64_t map_offset;
-	void *map;
-
-	uint32_t fb_id;
-};
-
-struct kms_plane {
-	uint32_t plane_id;
-	bool active;
-
-	/* property ids -- how clunky is this? */
-	uint32_t property_crtc_id;
-	uint32_t property_fb_id;
-	uint32_t property_crtc_x;
-	uint32_t property_crtc_y;
-	uint32_t property_crtc_w;
-	uint32_t property_crtc_h;
-	uint32_t property_src_x;
-	uint32_t property_src_y;
-	uint32_t property_src_w;
-	uint32_t property_src_h;
-	uint32_t property_src_formats;
-	uint32_t property_alpha;
-	uint32_t property_zpos;
-	uint32_t property_type;
-	uint32_t property_in_fence_id;
-};
-
-struct kms_status {
-	bool connected;
-	bool mode_ok;
-
-	uint32_t connector_id;
-	uint32_t encoder_id;
-	uint32_t crtc_id;
-	int crtc_width;
-	int crtc_height;
-	int crtc_index;
-
-	struct kms_plane *capture_scaling;
-	struct kms_plane *capture_yuv;
-
-	struct kms_plane *text;
-	struct kms_buffer *text_buffer;
-
-	struct kms_plane *logo;
-	struct kms_buffer *logo_buffer;
-
-	/*
-	 * it could be that the primary plane is not used by us, and
-	 * should be disabled
-	 */
-	struct kms_plane *plane_disable;
-
-	pthread_mutex_t capture_buffer_mutex[1];
-	/*
-	 * This is the buffer that is currently being shown. It will be
-	 * released as soon as the next buffer is shown using atomic modeset
-	 * commit.
-	 */
-	struct capture_buffer *capture_buffer_current;
-	/*
-	 * This is the buffer that our blocking atomic modeset is about to
-	 * show.
-	 */
-	struct capture_buffer *capture_buffer_next;
-	/*
-	 * This is the upcoming buffer that was last queued by capture.
-	 */
-	struct capture_buffer *capture_buffer_new;
-};
-static struct kms_status *kms_status;
 
 struct kms_projector {
 	bool connected;
@@ -281,7 +198,7 @@ kms_connection_string(drmModeConnection connection)
 	return "connection unknown";
 }
 
-static int
+int
 kms_connector_id_get(uint32_t type, uint32_t *id_ret)
 {
 	drmModeRes *resources;
@@ -366,7 +283,7 @@ kms_crtc_indices_get(void)
 	return 0;
 }
 
-static int
+int
 kms_crtc_index_get(uint32_t id)
 {
 	int i;
@@ -382,7 +299,7 @@ kms_crtc_index_get(uint32_t id)
 /*
  * DRM/KMS clunk galore.
  */
-static int
+int
 kms_connection_check(uint32_t connector_id, bool *connected,
 		     uint32_t *encoder_id)
 {
@@ -407,7 +324,7 @@ kms_connection_check(uint32_t connector_id, bool *connected,
 	return 0;
 }
 
-static int
+int
 kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
 		int *width, int *height)
 {
@@ -450,7 +367,7 @@ kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
 	return 0;
 }
 
-static struct kms_plane *
+struct kms_plane *
 kms_plane_create(uint32_t plane_id)
 {
 	struct kms_plane *plane;
@@ -527,126 +444,6 @@ kms_plane_create(uint32_t plane_id)
 	drmModeFreeObjectProperties(properties);
 
 	return plane;
-}
-
-/*
- * Get all the desired planes in one go.
- */
-static int
-kms_status_planes_get(struct kms_status *status)
-{
-	drmModePlaneRes *resources_plane = NULL;
-	int ret = 0, i;
-
-	/* Get plane resources so we can start sifting through the planes */
-	resources_plane = drmModeGetPlaneResources(kms_fd);
-	if (!resources_plane) {
-		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
-			__func__);
-		ret = 0;
-		goto error;
-	}
-
-	/* now cycle through the planes to find one for our crtc */
-	for (i = 0; i < (int) resources_plane->count_planes; i++) {
-		drmModePlane *plane;
-		uint32_t plane_id = resources_plane->planes[i];
-		bool frontend = false, yuv = false, layer = false;
-		bool used = false;
-		int j;
-
-		plane = drmModeGetPlane(kms_fd, plane_id);
-		if (!plane) {
-			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
-				__func__, plane_id, strerror(errno));
-			ret = 0;
-			goto error;
-		}
-
-		if (!(plane->possible_crtcs & (1 << status->crtc_index)))
-			goto plane_next;
-
-		for (j = 0; j < (int) plane->count_formats; j++) {
-			switch (plane->formats[j]) {
-			/* only supported by frontend */
-			case DRM_FORMAT_NV12:
-				frontend = true;
-				break;
-			/* supported by the frontend and yuv layers */
-			case DRM_FORMAT_R8_G8_B8:
-				yuv = true;
-				break;
-			/* not supported by the sprites */
-			case DRM_FORMAT_RGB565:
-				layer = true;
-				break;
-			default:
-				break;
-			}
-		}
-
-		if (frontend) {
-			status->capture_scaling =
-				kms_plane_create(plane->plane_id);
-			if (!status->capture_scaling) {
-				ret = -1;
-				goto plane_error;
-			}
-			used = true;
-		} else if (yuv) {
-			status->capture_yuv =
-				kms_plane_create(plane->plane_id);
-			if (!status->capture_yuv) {
-				ret = -1;
-				goto plane_error;
-			}
-			used = true;
-		} else if (!layer) {
-			if (!status->text) {
-				status->text =
-					kms_plane_create(plane->plane_id);
-				if (!status->text) {
-					ret = -1;
-					goto plane_error;
-				}
-				used = true;
-			} else if (!status->logo) {
-				status->logo =
-					kms_plane_create(plane->plane_id);
-				if (!status->logo) {
-					ret = -1;
-					goto plane_error;
-				}
-				used = true;
-			}
-		}
-
-		if (plane->fb_id && !used) {
-			if (!status->plane_disable) {
-				status->plane_disable =
-					kms_plane_create(plane->plane_id);
-				/* if this fails, continue */
-			} else
-				fprintf(stderr, "%s: multiple planes need to "
-					"be disabled (%d, %d)!\n", __func__,
-					status->plane_disable->plane_id,
-					plane->plane_id);
-		}
-
-	plane_next:
-		drmModeFreePlane(plane);
-		continue;
-	plane_error:
-		drmModeFreePlane(plane);
-		break;
-	}
-
-	if (status->plane_disable)
-		status->plane_disable->active = true;
-
- error:
-	drmModeFreePlaneResources(resources_plane);
-	return ret;
 }
 
 /*
@@ -869,7 +666,7 @@ kms_buffer_import(struct capture_buffer *buffer)
 /*
  *
  */
-static struct kms_buffer *
+struct kms_buffer *
 kms_png_read(const char *filename)
 {
 	struct kms_buffer *buffer;
@@ -1036,257 +833,9 @@ kms_projector_init(void)
 }
 
 /*
- * Show input buffer on the status lcd, in the top right corner.
- */
-static void
-kms_status_capture_set(struct kms_status *status,
-		       struct capture_buffer *buffer,
-		       drmModeAtomicReqPtr request)
-{
-	struct kms_plane *plane = status->capture_scaling;
-
-	if (!buffer)
-		return;
-
-	if (!plane->active) {
-		int x, y, w, h;
-
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_id,
-					 status->crtc_id);
-
-#if 0
-		/* top right corner */
-		x = status->crtc_width / 2;
-		y = 0;
-		w = status->crtc_width / 2;
-		h = buffer->height * w / buffer->width;
-#else
-				/* Scale, with borders, and center */
-		if ((buffer->width == status->crtc_width) &&
-		    (buffer->height == status->crtc_height)) {
-			x = 0;
-			y = 0;
-			w = status->crtc_width;
-			h = status->crtc_height;
-		} else {
-			/* first, try to fit horizontally. */
-			w = status->crtc_width;
-			h = buffer->height * status->crtc_width /
-				buffer->width;
-
-			/* if height does not fit, inverse the logic */
-			if (h > status->crtc_height) {
-				h = status->crtc_height;
-				w = buffer->width * status->crtc_height /
-					buffer->height;
-			}
-
-			/* center */
-			x = (status->crtc_width - w) / 2;
-			y = (status->crtc_height -h) / 2;
-		}
-#endif
-
-		printf("%s(): %4dx%4d -> %4dx%4d\n", __func__, x, y, w, h);
-
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_x, x);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_y, y);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_w, w);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_h, h);
-
-		/* read in full size image */
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_x, 0);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_y, 0);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_w,
-					 buffer->width << 16);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_h,
-					 buffer->height << 16);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_alpha,
-					 0x4000);
-
-		plane->active = true;
-	}
-
-	/* actual flip. */
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_fb_id,
-				 buffer->kms_fb_id);
-}
-
-/*
- * Show status text on bottom of the status lcd.
- */
-static void
-kms_status_text_set(struct kms_status *status, drmModeAtomicReqPtr request)
-{
-	struct kms_plane *plane = status->text;
-	struct kms_buffer *buffer = status->text_buffer;
-
-	if (!plane->active) {
-		int x, y, w, h;
-
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_id,
-					 status->crtc_id);
-
-		/* bottom, with a bit of space remaining */
-		x = 8;
-		y = status->crtc_height - 8 - buffer->height;
-		w = buffer->width;
-		h = buffer->height;
-
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_x, x);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_y, y);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_w, w);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_h, h);
-
-		/* read in full size image */
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_x, 0);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_y, 0);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_w,
-					 buffer->width << 16);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_h,
-					 buffer->height << 16);
-
-		plane->active = true;
-	}
-
-	/* actual flip. */
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_fb_id,
-				 buffer->fb_id);
-}
-
-/*
- * Show logo on the top right of status lcd.
- */
-static void
-kms_status_logo_set(struct kms_status *status, drmModeAtomicReqPtr request)
-{
-	struct kms_plane *plane = status->logo;
-	struct kms_buffer *buffer = status->logo_buffer;
-
-	if (!plane->active) {
-		int x, y, w, h;
-
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_id,
-					 status->crtc_id);
-
-		/* top right, with a bit of space remaining */
-		x = status->crtc_width - 8 - buffer->width;
-		y = 8;
-		w = buffer->width;
-		h = buffer->height;
-
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_x, x);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_y, y);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_w, w);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_crtc_h, h);
-
-		/* read in full size image */
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_x, 0);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_y, 0);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_w,
-					 buffer->width << 16);
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_src_h,
-					 buffer->height << 16);
-
-		drmModeAtomicAddProperty(request, plane->plane_id,
-					 plane->property_zpos,
-					 4);
-
-		plane->active = true;
-	}
-
-	/* actual flip. */
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_fb_id,
-				 buffer->fb_id);
-}
-
-/*
- * Status LCD.
- */
-static struct kms_status *
-kms_status_init(void)
-{
-	struct kms_status *status;
-	int ret;
-
-	status = calloc(1, sizeof(struct kms_status));
-	if (!status)
-		return NULL;
-
-	pthread_mutex_init(status->capture_buffer_mutex, NULL);
-
-	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_DPI,
-				   &status->connector_id);
-	if (ret)
-		return NULL;
-
-	ret = kms_connection_check(status->connector_id,
-				   &status->connected, &status->encoder_id);
-	if (ret)
-		return NULL;
-
-	ret = kms_crtc_id_get(status->encoder_id,
-			      &status->crtc_id, &status->mode_ok,
-			      &status->crtc_width, &status->crtc_height);
-	if (ret)
-		return NULL;
-
-	ret = kms_crtc_index_get(status->crtc_id);
-	if (ret < 0)
-		return NULL;
-
-	status->crtc_index = ret;
-
-	ret = kms_status_planes_get(status);
-	if (ret)
-		return NULL;
-
-	status->text_buffer = kms_png_read("status_text.png");
-	if (!status->text_buffer)
-		return NULL;
-
-	status->logo_buffer = kms_png_read("fosdem_logo.png");
-	if (!status->logo_buffer)
-		return NULL;
-
-	return status;
-}
-
-/*
  * Yes, you really need all this to disable a plane.
  */
-static void
+void
 kms_plane_disable(struct kms_plane *kms_plane, drmModeAtomicReqPtr request)
 {
 	drmModeAtomicAddProperty(request, kms_plane->plane_id,
@@ -1329,36 +878,6 @@ kms_projector_frame_update(struct kms_projector *projector,
 
 	if (projector->plane_disable && projector->plane_disable->active)
 		kms_plane_disable(projector->plane_disable, request);
-
-	ret = drmModeAtomicCommit(kms_fd, request,
-				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
-
-	drmModeAtomicFree(request);
-
-	if (ret) {
-		fprintf(stderr, "%s: failed to show frame %d: %s\n",
-			__func__, frame, strerror(errno));
-		ret = -errno;
-	}
-
-	return ret;
-}
-
-static int
-kms_status_frame_update(struct kms_status *status,
-			struct capture_buffer *buffer, int frame)
-{
-	drmModeAtomicReqPtr request;
-	int ret;
-
-	request = drmModeAtomicAlloc();
-
-	kms_status_capture_set(status, buffer, request);
-	kms_status_text_set(status, request);
-	kms_status_logo_set(status, request);
-
-	if (status->plane_disable && status->plane_disable->active)
-		kms_plane_disable(status->plane_disable, request);
 
 	ret = drmModeAtomicCommit(kms_fd, request,
 				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
@@ -1426,59 +945,6 @@ kms_projector_capture_display(struct capture_buffer *buffer)
 		capture_buffer_display_release(old);
 }
 
-static void *
-kms_status_thread_handler(void *arg)
-{
-	struct kms_status *status = (struct kms_status *) arg;
-	int ret, i;
-
-	for (i = 0; i < kms_frame_count; i++) {
-		struct capture_buffer *new, *old;
-
-		pthread_mutex_lock(status->capture_buffer_mutex);
-
-		new = status->capture_buffer_new;
-		status->capture_buffer_new = NULL;
-
-		pthread_mutex_unlock(status->capture_buffer_mutex);
-
-		ret = kms_status_frame_update(status, new, i);
-		if (ret)
-			return NULL;
-
-		old = status->capture_buffer_current;
-		status->capture_buffer_current = new;
-
-		if (old)
-			capture_buffer_display_release(old);
-
-		if (!new)
-			usleep(16667);
-	}
-
-	printf("%s: done!\n", __func__);
-
-	return NULL;
-}
-
-void
-kms_status_capture_display(struct capture_buffer *buffer)
-{
-	struct kms_status *status = kms_status;
-	struct capture_buffer *old;
-
-	pthread_mutex_lock(status->capture_buffer_mutex);
-
-	old = status->capture_buffer_new;
-
-	status->capture_buffer_new = buffer;
-
-	pthread_mutex_unlock(status->capture_buffer_mutex);
-
-	if (old)
-		capture_buffer_display_release(old);
-}
-
 int
 kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 {
@@ -1494,18 +960,9 @@ kms_init(int width, int height, int bpp, uint32_t format, unsigned long count)
 	if (ret)
 		return ret;
 
-	kms_status = kms_status_init();
-	if (!kms_status)
-		return -1;
-
-	ret = pthread_create(kms_status_thread, NULL,
-			     kms_status_thread_handler,
-			     (void *) kms_status);
-	if (ret) {
-		fprintf(stderr, "%s() status thread creation failed: %s\n",
-			__func__, strerror(ret));
+	ret = kms_status_init(count);
+	if (ret)
 		return ret;
-	}
 
 	kms_projector = kms_projector_init();
 	if (!kms_projector)

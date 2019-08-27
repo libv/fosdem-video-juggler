@@ -30,6 +30,7 @@
 #include <inttypes.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <stdbool.h>
 
 #include <linux/videodev2.h>
 
@@ -37,6 +38,7 @@
 
 #include "capture.h"
 #include "kms.h"
+#include "status.h"
 
 int capture_fd = -1;
 

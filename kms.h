@@ -19,11 +19,64 @@
 #define _HAVE_KMS_H_ 1
 
 struct capture_buffer;
+struct _drmModeAtomicReq;
+
+extern int kms_fd;
+
+struct kms_buffer {
+	int width;
+	int height;
+	uint32_t format;
+
+	uint32_t handle; /* dumb buffer handle */
+
+	int pitch;
+	size_t size;
+
+	uint64_t map_offset;
+	void *map;
+
+	uint32_t fb_id;
+};
+
+struct kms_plane {
+	uint32_t plane_id;
+	bool active;
+
+	/* property ids -- how clunky is this? */
+	uint32_t property_crtc_id;
+	uint32_t property_fb_id;
+	uint32_t property_crtc_x;
+	uint32_t property_crtc_y;
+	uint32_t property_crtc_w;
+	uint32_t property_crtc_h;
+	uint32_t property_src_x;
+	uint32_t property_src_y;
+	uint32_t property_src_w;
+	uint32_t property_src_h;
+	uint32_t property_src_formats;
+	uint32_t property_alpha;
+	uint32_t property_zpos;
+	uint32_t property_type;
+	uint32_t property_in_fence_id;
+};
+
+int kms_connector_id_get(uint32_t type, uint32_t *id_ret);
+int kms_connection_check(uint32_t connector_id, bool *connected,
+			 uint32_t *encoder_id);
+int kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
+		    int *width, int *height);
+int kms_crtc_index_get(uint32_t id);
+
+struct kms_plane *kms_plane_create(uint32_t plane_id);
+void kms_plane_disable(struct kms_plane *kms_plane,
+		       struct _drmModeAtomicReq *request);
+
+struct kms_buffer *kms_png_read(const char *filename);
 
 int kms_buffer_import(struct capture_buffer *buffer);
 
 void kms_projector_capture_display(struct capture_buffer *buffer);
-void kms_status_capture_display(struct capture_buffer *buffer);
 
 int kms_init(int width, int height, int bpp, uint32_t format,
 	     unsigned long count);
