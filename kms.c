@@ -1381,11 +1381,27 @@ kms_projector_thread_handler(void *arg)
 	int ret, i;
 
 	for (i = 0; i < kms_frame_count; i++) {
-		ret = kms_projector_frame_update(projector,
-						 projector->capture_buffer_next,
-						 i);
+		struct capture_buffer *new, *old;
+
+		pthread_mutex_lock(projector->capture_buffer_mutex);
+
+		new = projector->capture_buffer_new;
+		projector->capture_buffer_new = NULL;
+
+		pthread_mutex_unlock(projector->capture_buffer_mutex);
+
+		ret = kms_projector_frame_update(projector, new, i);
 		if (ret)
 			return NULL;
+
+		old = projector->capture_buffer_current;
+		projector->capture_buffer_current = new;
+
+		if (old)
+			capture_buffer_display_release(old);
+
+		if (!new)
+			usleep(16667);
 	}
 
 	printf("%s: done!\n", __func__);
@@ -1417,11 +1433,27 @@ kms_status_thread_handler(void *arg)
 	int ret, i;
 
 	for (i = 0; i < kms_frame_count; i++) {
-		ret = kms_status_frame_update(status,
-					      status->capture_buffer_next,
-					      i);
+		struct capture_buffer *new, *old;
+
+		pthread_mutex_lock(status->capture_buffer_mutex);
+
+		new = status->capture_buffer_new;
+		status->capture_buffer_new = NULL;
+
+		pthread_mutex_unlock(status->capture_buffer_mutex);
+
+		ret = kms_status_frame_update(status, new, i);
 		if (ret)
 			return NULL;
+
+		old = status->capture_buffer_current;
+		status->capture_buffer_current = new;
+
+		if (old)
+			capture_buffer_display_release(old);
+
+		if (!new)
+			usleep(16667);
 	}
 
 	printf("%s: done!\n", __func__);
