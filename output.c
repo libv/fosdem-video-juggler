@@ -291,6 +291,11 @@ int main(int argc, char *argv[])
 
 	output->crtc_index = ret;
 
+	printf("Using CRTC %X (%dx%d), connector %X (%s).\n",
+	       output->crtc_id, output->crtc_width, output->crtc_height,
+	       output->connector_id,
+	       kms_connector_string(DRM_MODE_CONNECTOR_HDMIA));
+
 	ret = kms_output_planes_get(output);
 	if (ret)
 		return ret;

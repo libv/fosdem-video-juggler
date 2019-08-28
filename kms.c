@@ -68,7 +68,7 @@ kms_fd_init(const char *driver_name)
 	return 0;
 }
 
-static __maybe_unused char *
+static __maybe_unused const char *
 kms_encoder_string(uint32_t encoder)
 {
 	struct {
@@ -94,7 +94,7 @@ kms_encoder_string(uint32_t encoder)
 	return table[0].name;
 }
 
-static __maybe_unused char *
+const char *
 kms_connector_string(uint32_t connector)
 {
 	struct {
@@ -129,7 +129,7 @@ kms_connector_string(uint32_t connector)
 	return table[0].name;
 }
 
-static __maybe_unused char *
+static __maybe_unused const char *
 kms_connection_string(drmModeConnection connection)
 {
 	struct {

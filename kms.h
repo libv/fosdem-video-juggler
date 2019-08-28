@@ -62,6 +62,7 @@ struct kms_plane {
 };
 
 int kms_connector_id_get(uint32_t type, uint32_t *id_ret);
+const char *kms_connector_string(uint32_t connector);
 int kms_connection_check(uint32_t connector_id, bool *connected,
 			 uint32_t *encoder_id);
 int kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
