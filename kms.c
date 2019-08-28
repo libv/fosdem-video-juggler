@@ -319,6 +319,95 @@ kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
 	return 0;
 }
 
+
+int
+kms_crtc_modeline_print(uint32_t crtc_id)
+{
+	drmModePropertyBlobRes *blob;
+	drmModeModeInfo *mode = NULL;
+	drmModeObjectProperties *properties;
+	uint32_t blob_id;
+	int i;
+
+	properties = drmModeObjectGetProperties(kms_fd, crtc_id,
+						DRM_MODE_OBJECT_CRTC);
+	if (!properties) {
+		/* yes, if there are no properties, this returns EINVAL */
+		if (errno != EINVAL) {
+			fprintf(stderr,
+				"%s(0x%02X): Failed to get properties: %s\n",
+				__func__, crtc_id, strerror(errno));
+			return errno;
+		}
+
+		return -1;
+	}
+
+	for (i = 0; i < (int) properties->count_props; i++) {
+		drmModePropertyRes *property;
+
+		property = drmModeGetProperty(kms_fd,
+					      properties->props[i]);
+		if (!property) {
+			fprintf(stderr, "%s(0x%02X): Failed to get property"
+				" %u: %s\n", __func__, crtc_id,
+				properties->props[i], strerror(errno));
+			continue;
+		}
+
+		if (!strcmp(property->name, "MODE_ID")) {
+			/*
+			 * So, wait, a blob id value comes from the list of
+			 * properties, and is not separately present in the
+			 * actual property? WTF?
+			 */
+			blob_id = (uint32_t) properties->prop_values[i];
+			drmModeFreeProperty(property);
+			break;
+		}
+
+		drmModeFreeProperty(property);
+	}
+
+	if (i == (int) properties->count_props) {
+		fprintf(stderr, "%s(0x%02X): Failed to get MODE_ID property\n",
+			__func__, crtc_id);
+		drmModeFreeObjectProperties(properties);
+		return -1;
+	}
+
+	drmModeFreeObjectProperties(properties);
+
+	blob = drmModeGetPropertyBlob(kms_fd, blob_id);
+	if (!blob) {
+		fprintf(stderr, "%s(0x%02X): Failed to get property blob "
+			"%X: %s\n", __func__, crtc_id, blob_id,
+			strerror(errno));
+		return -1;
+	}
+
+	if (blob->length != sizeof(drmModeModeInfo)) {
+		fprintf(stderr, "%s(0x%02X): wrong blob size: "
+			"%d should be %d\n", __func__, crtc_id,
+			blob->length, (int) sizeof(drmModeModeInfo));
+		drmModeFreePropertyBlob(blob);
+		return -1;
+	}
+
+	mode = blob->data;
+
+	printf("Modeline  \"%s\"  %.2f  %d %d %d %d  %d %d %d %d  "
+	       "%chsync %cvsync\n", mode->name, mode->clock / 1000.0,
+	       mode->hdisplay, mode->hsync_start, mode->hsync_end, mode->htotal,
+	       mode->vdisplay, mode->vsync_start, mode->vsync_end, mode->vtotal,
+	       (mode->flags & DRM_MODE_FLAG_PHSYNC) ? '+' : '-',
+	       (mode->flags & DRM_MODE_FLAG_PVSYNC) ? '+' : '-');
+
+	drmModeFreePropertyBlob(blob);
+
+	return 0;
+}
+
 struct kms_plane *
 kms_plane_create(uint32_t plane_id)
 {

@@ -1,4 +1,4 @@
-CFLAGS += -Wall -Iinclude -O3 -g
+CFLAGS += -Wall -Iinclude -O0 -g
 LDFLAGS += -pthread
 
 # add drm

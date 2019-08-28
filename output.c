@@ -26,6 +26,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
@@ -295,6 +296,7 @@ int main(int argc, char *argv[])
 	       output->crtc_id, output->crtc_width, output->crtc_height,
 	       output->connector_id,
 	       kms_connector_string(DRM_MODE_CONNECTOR_HDMIA));
+	kms_crtc_modeline_print(output->crtc_id);
 
 	ret = kms_output_planes_get(output);
 	if (ret)
