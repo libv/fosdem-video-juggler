@@ -43,7 +43,8 @@ struct kms_output {
 	int crtc_height;
 	int crtc_index;
 
-	struct kms_plane *plane_scaling;
+	struct kms_plane *plane_background;
+	struct kms_buffer *buffer_background;
 
 	struct kms_plane *plane_topleft;
 	struct kms_plane *plane_topright;
@@ -115,9 +116,9 @@ kms_output_planes_get(struct kms_output *output)
 		}
 
 		if (frontend) {
-			output->plane_scaling =
+			output->plane_background =
 				kms_plane_create(plane->plane_id);
-			if (!output->plane_scaling) {
+			if (!output->plane_background) {
 				ret = -1;
 				goto plane_error;
 			}
@@ -194,11 +195,57 @@ kms_output_planes_get(struct kms_output *output)
 	return ret;
 }
 
+static void
+kms_output_background_set(struct kms_output *output,
+			  drmModeAtomicReqPtr request)
+{
+	struct kms_plane *plane = output->plane_background;
+	struct kms_buffer *buffer = output->buffer_background;
+
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_id,
+				 output->crtc_id);
+
+	/* Full crtc size */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_x, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_y, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_w,
+				 buffer->width);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_h,
+					 buffer->height);
+
+	/* read in full size image */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_x, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_y, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_w,
+				 buffer->width << 16);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_h,
+				 buffer->height << 16);
+
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_zpos, 0);
+
+	plane->active = true;
+
+	/* actual flip. */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_fb_id,
+				 buffer->fb_id);
+}
+
 int main(int argc, char *argv[])
 {
 	struct kms_output *output;
 	unsigned long count = 1000;
-	int ret;
+	int ret, i;
 
 	if (argc > 1) {
 		ret = sscanf(argv[1], "%lu", &count);
@@ -248,8 +295,32 @@ int main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
-	while (1)
+	output->buffer_background =
+		kms_png_read("PM5644_test_card_FOSDEM.1280x720.png");
+	if (!output->buffer_background)
+		return -1;
+
+	for (i = 0 ; i < count; i++) {
+		drmModeAtomicReqPtr request = drmModeAtomicAlloc();
+
+		if (1 || !output->plane_background->active)
+			kms_output_background_set(output, request);
+
+		if (output->plane_disable && output->plane_disable->active)
+			kms_plane_disable(output->plane_disable, request);
+
+		ret = drmModeAtomicCommit(kms_fd, request,
+					  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+
+		drmModeAtomicFree(request);
+
+		if (ret) {
+			fprintf(stderr, "%s: failed to show frame %d: %s\n",
+				__func__, i, strerror(errno));
+			return ret;
+		}
 		sleep(1);
+	}
 
 	return 0;
 }
