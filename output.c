@@ -27,10 +27,33 @@
 #include <unistd.h>
 #include <stdbool.h>
 
+#include <drm_fourcc.h>
+
 #include "kms.h"
+
+struct kms_output {
+	bool connected;
+	bool mode_ok;
+
+	uint32_t connector_id;
+	uint32_t encoder_id;
+	uint32_t crtc_id;
+	int crtc_width;
+	int crtc_height;
+	int crtc_index;
+
+	struct kms_plane *plane_scaling;
+
+	struct kms_plane *plane_topleft;
+	struct kms_plane *plane_topright;
+	struct kms_plane *plane_middle;
+	struct kms_plane *plane_bottomleft;
+	struct kms_plane *plane_bottomright;
+};
 
 int main(int argc, char *argv[])
 {
+	struct kms_output *output;
 	unsigned long count = 1000;
 	int ret;
 
@@ -52,6 +75,31 @@ int main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
+	output = calloc(1, sizeof(struct kms_output));
+	if (!output)
+		return -ENOMEM;
+
+	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_HDMIA,
+				   &output->connector_id);
+	if (ret)
+		return ret;
+
+	ret = kms_connection_check(output->connector_id,
+				   &output->connected, &output->encoder_id);
+	if (ret)
+		return ret;
+
+	ret = kms_crtc_id_get(output->encoder_id,
+			      &output->crtc_id, &output->mode_ok,
+			      &output->crtc_width, &output->crtc_height);
+	if (ret)
+		return ret;
+
+	ret = kms_crtc_index_get(output->crtc_id);
+	if (ret < 0)
+		return ret;
+
+	output->crtc_index = ret;
 
 	while (1)
 		sleep(1);
