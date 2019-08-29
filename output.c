@@ -454,7 +454,7 @@ int main(int argc, char *argv[])
 	for (i = 0 ; i < count; i++) {
 		drmModeAtomicReqPtr request = drmModeAtomicAlloc();
 
-		if (1 || !output->plane_background->active)
+		if (!output->plane_background->active)
 			kms_output_background_set(output, request);
 
 		if (output->plane_disable && output->plane_disable->active)
@@ -474,7 +474,6 @@ int main(int argc, char *argv[])
 				__func__, i, strerror(errno));
 			return ret;
 		}
-		sleep(1);
 	}
 
 	return 0;
