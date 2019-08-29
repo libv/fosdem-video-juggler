@@ -33,6 +33,20 @@
 
 #include "kms.h"
 
+struct output_test {
+	struct kms_plane *plane;
+
+	struct kms_buffer *buffers[2];
+
+	int x;
+	int y;
+	int w;
+	int h;
+};
+#define OUTPUT_TEST_COUNT 5
+#define OUTPUT_TEST_WIDTH 16
+#define OUTPUT_TEST_HEIGHT 16
+
 struct kms_output {
 	bool connected;
 	bool mode_ok;
@@ -47,11 +61,7 @@ struct kms_output {
 	struct kms_plane *plane_background;
 	struct kms_buffer *buffer_background;
 
-	struct kms_plane *plane_topleft;
-	struct kms_plane *plane_topright;
-	struct kms_plane *plane_middle;
-	struct kms_plane *plane_bottomleft;
-	struct kms_plane *plane_bottomright;
+	struct output_test tests[OUTPUT_TEST_COUNT][1];
 
 	/*
 	 * it could be that the primary plane is not used by us, and
@@ -67,7 +77,7 @@ static int
 kms_output_planes_get(struct kms_output *output)
 {
 	drmModePlaneRes *resources_plane = NULL;
-	int ret = 0, i;
+	int ret = 0, i, test = 0;
 
 	/* Get plane resources so we can start sifting through the planes */
 	resources_plane = drmModeGetPlaneResources(kms_fd);
@@ -125,45 +135,14 @@ kms_output_planes_get(struct kms_output *output)
 			}
 			used = true;
 		} else if (!yuv && !layer) {
-			if (!output->plane_topleft) {
-				output->plane_topleft =
+			if (test < OUTPUT_TEST_COUNT) {
+				output->tests[test]->plane =
 					kms_plane_create(plane->plane_id);
-				if (!output->plane_topleft) {
+				if (!output->tests[test]->plane) {
 					ret = -1;
 					goto plane_error;
 				}
-				used = true;
-			} else if (!output->plane_topright) {
-				output->plane_topright =
-					kms_plane_create(plane->plane_id);
-				if (!output->plane_topright) {
-					ret = -1;
-					goto plane_error;
-				}
-				used = true;
-			} else if (!output->plane_middle) {
-				output->plane_middle =
-					kms_plane_create(plane->plane_id);
-				if (!output->plane_middle) {
-					ret = -1;
-					goto plane_error;
-				}
-				used = true;
-			} else if (!output->plane_bottomleft) {
-				output->plane_bottomleft =
-					kms_plane_create(plane->plane_id);
-				if (!output->plane_bottomleft) {
-					ret = -1;
-					goto plane_error;
-				}
-				used = true;
-			} else if (!output->plane_bottomright) {
-				output->plane_bottomright =
-					kms_plane_create(plane->plane_id);
-				if (!output->plane_bottomright) {
-					ret = -1;
-					goto plane_error;
-				}
+				test++;
 				used = true;
 			}
 		}
