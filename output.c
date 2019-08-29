@@ -221,6 +221,56 @@ kms_output_background_set(struct kms_output *output,
 				 buffer->fb_id);
 }
 
+static int
+output_test_init(struct output_test *test, int x, int y, int w, int h)
+{
+	test->x = x;
+	test->y = y;
+	test->w = w;
+	test->h = h;
+
+	return 0;
+}
+
+static int
+kms_output_tests_init(struct kms_output *output)
+{
+	int w = OUTPUT_TEST_WIDTH;
+	int h = OUTPUT_TEST_HEIGHT;
+	int right = output->crtc_width - w;
+	int bottom = output->crtc_height - h;
+	int middle_x = (output->crtc_width - w) / 2;
+	int middle_y = (output->crtc_height - h) / 2;
+	int ret;
+
+	/* Top left. */
+	ret = output_test_init(output->tests[0], 0, 0, w, h);
+	if (ret)
+		return ret;
+
+	/* Top right. */
+	ret = output_test_init(output->tests[1], right, 0, w, h);
+	if (ret)
+		return ret;
+
+	/* Middle. */
+	ret = output_test_init(output->tests[2], middle_x, middle_y, w, h);
+	if (ret)
+		return ret;
+
+	/* Bottom left. */
+	ret = output_test_init(output->tests[3], 0, bottom, w, h);
+	if (ret)
+		return ret;
+
+	/* Bottom right */
+	ret = output_test_init(output->tests[4], right, bottom, w, h);
+	if (ret)
+		return ret;
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	struct kms_output *output;
@@ -285,6 +335,10 @@ int main(int argc, char *argv[])
 		kms_png_read("PM5644_test_card_FOSDEM.1280x720.png");
 	if (!output->buffer_background)
 		return -1;
+
+	ret = kms_output_tests_init(output);
+	if (ret)
+		return ret;
 
 	for (i = 0 ; i < count; i++) {
 		drmModeAtomicReqPtr request = drmModeAtomicAlloc();
