@@ -324,11 +324,69 @@ kms_output_tests_init(struct kms_output *output)
 	return 0;
 }
 
+static void
+output_test_frame_set(struct kms_output *output, struct output_test *test,
+		      drmModeAtomicReqPtr request, int frame)
+{
+	struct kms_plane *plane = test->plane;
+	struct kms_buffer *buffer = test->buffers[frame & 0x01];
+
+	if (!plane->active) {
+		printf("test: 0x%02X (%dx%d) -> %4dx%4d (%dx%d), "
+		       "plane 0x%02X, crtc 0x%02X\n",
+		       buffer->fb_id, buffer->width, buffer->height,
+		       test->x, test->y, test->w, test->h,
+		       test->plane->plane_id, output->crtc_id);
+
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_id,
+					 output->crtc_id);
+
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_x,
+					 test->x);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_y,
+					 test->y);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_w,
+					 test->w);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_crtc_h,
+					 test->h);
+
+		/* read in full size image */
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_src_x, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_src_y, 0);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_src_w,
+					 buffer->width << 16);
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_src_h,
+					 buffer->height << 16);
+
+		/*
+		 * we are using sprites, so zpos needs to be between 4 and
+		 * 36 (if only kms supported that many planes).
+		 * Instead of trying to be smart here, just keep the default.
+		 */
+
+		plane->active = true;
+	}
+
+	/* actual flip. */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_fb_id,
+				 buffer->fb_id);
+}
+
 int main(int argc, char *argv[])
 {
 	struct kms_output *output;
 	unsigned long count = 1000;
-	int ret, i;
+	int ret, i, j;
 
 	if (argc > 1) {
 		ret = sscanf(argv[1], "%lu", &count);
@@ -401,6 +459,10 @@ int main(int argc, char *argv[])
 
 		if (output->plane_disable && output->plane_disable->active)
 			kms_plane_disable(output->plane_disable, request);
+
+		for (j = 0; j < OUTPUT_TEST_COUNT; j++)
+			output_test_frame_set(output, output->tests[j],
+					      request, i);
 
 		ret = drmModeAtomicCommit(kms_fd, request,
 					  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
