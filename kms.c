@@ -487,20 +487,16 @@ kms_plane_create(uint32_t plane_id)
 	return plane;
 }
 
-static int
-kms_buffer_argb8888_get(struct kms_buffer *buffer,
-			int width, int height, uint32_t format)
+struct kms_buffer *
+kms_buffer_get(int width, int height, uint32_t format)
 {
+	struct kms_buffer *buffer;
 	struct drm_mode_create_dumb buffer_create = { 0 };
 	struct drm_mode_map_dumb buffer_map = { 0 };
 	uint32_t handles[4] = { 0 };
 	uint32_t pitches[4] = { 0 };
 	uint32_t offsets[4] = { 0 };
 	int ret;
-
-	buffer->width = width;
-	buffer->height = height;
-	buffer->format = format;
 
 	buffer_create.width = width;
 	buffer_create.height = height;
@@ -509,38 +505,35 @@ kms_buffer_argb8888_get(struct kms_buffer *buffer,
 	if (ret) {
 		fprintf(stderr, "%s: failed to create buffer: %s\n",
 			__func__, strerror(errno));
-		return ret;
+		return NULL;
 	}
+
+	buffer = calloc(1, sizeof(struct kms_buffer));
+	buffer->width = width;
+	buffer->height = height;
+	buffer->format = format;
 
 	buffer->handle = buffer_create.handle;
 	buffer->size = buffer_create.size;
 	buffer->pitch = buffer_create.pitch;
-	printf("%s(): Created buffer %dx%d@%dbpp: %02u (%tdbytes)\n",
-	       __func__, buffer->width, buffer->height,
-	       buffer_create.bpp, buffer->handle, buffer->size);
 
 	buffer_map.handle = buffer->handle;
 	ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer_map);
 	if (ret) {
 		fprintf(stderr, "%s: failed to map buffer: %s\n",
 			__func__, strerror(errno));
-		return -errno;
+		return NULL;
 	}
 
 	buffer->map_offset = buffer_map.offset;
-	printf("%s(): Mapped buffer %02u at offset 0x%jX\n",
-	       __func__, buffer->handle, buffer->map_offset);
 
 	buffer->map = mmap(0, buffer->size, PROT_READ | PROT_WRITE,
 			  MAP_SHARED, kms_fd, buffer->map_offset);
 	if (buffer->map == MAP_FAILED) {
 		fprintf(stderr, "%s: failed to mmap buffer: %s\n",
 			__func__, strerror(errno));
-		return -errno;
+		return NULL;
 	}
-
-	printf("%s(): MMapped buffer %02u to %p\n",
-	       __func__, buffer->handle, buffer->map);
 
 	handles[0] = buffer->handle;
 	pitches[0] = buffer->pitch;
@@ -551,12 +544,13 @@ kms_buffer_argb8888_get(struct kms_buffer *buffer,
 	if (ret) {
 		fprintf(stderr, "%s: failed to create fb: %s\n",
 			__func__, strerror(errno));
-		return -errno;
+		return NULL;
 	}
 
-	printf("Created FB %02u.\n", buffer->fb_id);
+	printf("%s(): Created FB %02u (%dx%d, %tdbytes).\n", __func__,
+	       buffer->fb_id, buffer->width, buffer->height, buffer->size);
 
-	return 0;
+	return buffer;
 }
 
 /*
@@ -631,14 +625,11 @@ kms_png_read(const char *filename)
 	printf("Reading from %s: %dx%d (%dbytes)\n", filename,
 	       image->width, image->height, PNG_IMAGE_SIZE(*image));
 
-	buffer = calloc(1, sizeof(struct kms_buffer));
-
-	ret = kms_buffer_argb8888_get(buffer, image->width, image->height,
-				      DRM_FORMAT_ARGB8888);
-	if (ret) {
+	buffer = kms_buffer_get(image->width, image->height,
+				DRM_FORMAT_ARGB8888);
+	if (!buffer) {
 		fprintf(stderr, "%s(): failed to create buffer for %s\n",
 			__func__, filename);
-		free(buffer);
 		png_image_free(image);
 		return NULL;
 	}

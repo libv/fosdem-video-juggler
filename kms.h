@@ -74,6 +74,7 @@ struct kms_plane *kms_plane_create(uint32_t plane_id);
 void kms_plane_disable(struct kms_plane *kms_plane,
 		       struct _drmModeAtomicReq *request);
 
+struct kms_buffer *kms_buffer_get(int width, int height, uint32_t format);
 struct kms_buffer *kms_png_read(const char *filename);
 
 int kms_buffer_import(struct capture_buffer *buffer);
