@@ -484,6 +484,8 @@ kms_plane_create(uint32_t plane_id)
 
 	drmModeFreeObjectProperties(properties);
 
+	printf("%s(): Created Plane 0x%02X\n", __func__, plane->plane_id);
+
 	return plane;
 }
 
@@ -547,7 +549,7 @@ kms_buffer_get(int width, int height, uint32_t format)
 		return NULL;
 	}
 
-	printf("%s(): Created FB %02u (%dx%d, %tdbytes).\n", __func__,
+	printf("%s(): Created FB 0x%02X (%dx%d, %tdbytes).\n", __func__,
 	       buffer->fb_id, buffer->width, buffer->height, buffer->size);
 
 	return buffer;

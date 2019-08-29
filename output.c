@@ -127,6 +127,7 @@ kms_output_planes_get(struct kms_output *output)
 		}
 
 		if (frontend) {
+			printf("Background Plane: ");
 			output->plane_background =
 				kms_plane_create(plane->plane_id);
 			if (!output->plane_background) {
@@ -136,6 +137,7 @@ kms_output_planes_get(struct kms_output *output)
 			used = true;
 		} else if (!yuv && !layer) {
 			if (test < OUTPUT_TEST_COUNT) {
+				printf("Test Plane %d: ", test);
 				output->tests[test]->plane =
 					kms_plane_create(plane->plane_id);
 				if (!output->tests[test]->plane) {
@@ -149,6 +151,7 @@ kms_output_planes_get(struct kms_output *output)
 
 		if (plane->fb_id && !used) {
 			if (!output->plane_disable) {
+				printf("Disable Plane: ");
 				output->plane_disable =
 					kms_plane_create(plane->plane_id);
 				/* if this fails, continue */
@@ -257,6 +260,9 @@ output_test_buffer_fill(void *buffer, int x, int y, int w, int h, int pitch)
 static int
 output_test_init(struct output_test *test, int x, int y, int w, int h)
 {
+	printf("%s(plane 0x%02X) = %4dx%4d (%4dx%4d)\n", __func__,
+	       test->plane->plane_id, x, y, w, h);
+
 	test->x = x;
 	test->y = y;
 	test->w = w;
