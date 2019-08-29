@@ -221,6 +221,39 @@ kms_output_background_set(struct kms_output *output,
 				 buffer->fb_id);
 }
 
+static void
+output_test_buffer_fill(void *buffer, int x, int y, int w, int h, int pitch)
+{
+	uint8_t *line;
+	uint8_t green;
+	int i, j;
+
+	line = buffer;
+	green = y;
+	for (j = 0; j < h; j++) {
+		uint32_t *p = (uint32_t *) line;
+		uint8_t red = x;
+
+		for (i = 0; i < w; i++) {
+			*p = 0xFF000000 | (green << 8) | red;
+			p++;
+			red++;
+		}
+
+		line += pitch;
+		green++;
+	}
+
+#if 0
+	/* some quick self-test */
+	uint32_t *p = buffer;
+	printf(" 0, 0: 0x%08X\n", p[0]);
+	printf("15, 0: 0x%08X\n", p[15]);
+	printf(" 0,15: 0x%08X\n", p[15 * 16]);
+	printf("15,15: 0x%08X\n", p[15 * 16 + 15]);
+#endif
+}
+
 static int
 output_test_init(struct output_test *test, int x, int y, int w, int h)
 {
@@ -228,6 +261,20 @@ output_test_init(struct output_test *test, int x, int y, int w, int h)
 	test->y = y;
 	test->w = w;
 	test->h = h;
+
+	test->buffers[0] = kms_buffer_get(w, h, DRM_FORMAT_ARGB8888);
+	if (!test->buffers[0])
+		return -1;
+
+	test->buffers[1] = kms_buffer_get(w, h, DRM_FORMAT_ARGB8888);
+	if (!test->buffers[1])
+		return -1;
+
+	output_test_buffer_fill(test->buffers[0]->map, x, y, w, h,
+				test->buffers[0]->pitch);
+
+	memcpy(test->buffers[1]->map, test->buffers[0]->map,
+	       test->buffers[0]->size);
 
 	return 0;
 }
