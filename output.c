@@ -196,7 +196,7 @@ kms_output_background_set(struct kms_output *output,
 				 buffer->width);
 	drmModeAtomicAddProperty(request, plane->plane_id,
 				 plane->property_crtc_h,
-					 buffer->height);
+				 buffer->height);
 
 	/* read in full size image */
 	drmModeAtomicAddProperty(request, plane->plane_id,
