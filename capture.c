@@ -40,6 +40,7 @@
 #include "kms.h"
 #include "status.h"
 #include "projector.h"
+#include "juggler.h"
 
 int capture_fd = -1;
 
@@ -415,18 +416,19 @@ capture_buffer_test_frame(int frame,
 
 		if (count != blue[offset])
 			printf("Frame %d: frame mismatch (%4d,%4d):"
-			       " 0x%02X vs 0x%02X.\n",
-			       frame, x, y, count, blue[offset]);
+			       " 0x%02X should be 0x%02X.\n",
+			       frame, x, y, blue[offset], count);
 	}
 
 	if (((x & 0xFF) != red[offset]) ||
 	    ((y & 0xFF) != green[offset]))
 		printf("Frame %d: position mismatch: (%4d,%4d)"
-		       "(0x%02X,0x%02X) vs (0x%02X,0x%02X)\n", frame, x, y,
-		       (x & 0xFF), (y & 0xFF), red[offset], green[offset]);
+		       "(0x%02X,0x%02X) should be (0x%02X,0x%02X)\n",
+		       frame, x, y, red[offset], green[offset],
+		       (x & 0xFF), (y & 0xFF));
 }
 
-static void
+static __maybe_unused void
 capture_buffer_test_empty(int frame,
 			  uint8_t *red, uint8_t *green, uint8_t *blue,
 			  int x, int y)
@@ -440,11 +442,12 @@ capture_buffer_test_empty(int frame,
 	if (((x & 0xFF) != red[offset]) ||
 	    ((y & 0xFF) != green[offset]))
 		printf("Frame %d: position mismatch: (%4d,%4d)"
-		       "(0x%02X,0x%02X) vs (0x%02X,0x%02X)\n", frame, x, y,
-		       (x & 0xFF), (y & 0xFF), red[offset], green[offset]);
+		       "(0x%02X,0x%02X) should be (0x%02X,0x%02X)\n",
+		       frame, x, y, red[offset], green[offset],
+		       (x & 0xFF), (y & 0xFF));
 }
 
-static void
+static  __maybe_unused void
 capture_buffer_test(struct capture_buffer *buffer, int frame)
 {
 	uint8_t *red, *green, *blue;
@@ -458,134 +461,65 @@ capture_buffer_test(struct capture_buffer *buffer, int frame)
 
 	printf("\rTesting frame %4d (%2d):", frame, buffer->index);
 
-	/* Test 2x2 pixels in the upper left corner */
-	capture_buffer_test_frame(frame, red, green, blue, 0, 0);
-	capture_buffer_test_frame(frame, red, green, blue, 1, 0);
-	capture_buffer_test_frame(frame, red, green, blue, 0, 1);
-	capture_buffer_test_empty(frame, red, green, blue, 1, 1);
-
-	/* Test 2x2 pixels in the upper right corner */
+	/*
+	 * Test 16x16 pixels in the lower right corner, this will also
+	 * initialize the frame counter, so make it the lower corner to
+	 * work around the tfp401s limitations.
+	 */
 	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 2, 0);
+				  capture_width - 16, capture_height - 16);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 1, 0);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  capture_width - 2, 1);
+				  capture_width - 1, capture_height - 16);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 1, 1);
-
-	/* Test 2x2 pixels in the lower left corner */
-	capture_buffer_test_frame(frame, red, green, blue,
-				  0, capture_height - 2);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  1, capture_height - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  0, capture_height - 1);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  1, capture_height - 1);
-
-	/* Test 2x2 pixels in the lower right corner */
-	capture_buffer_test_empty(frame, red, green, blue,
-				  capture_width - 2, capture_height - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 1, capture_height - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 2, capture_height - 1);
+				  capture_width - 16, capture_height - 1);
 	capture_buffer_test_frame(frame, red, green, blue,
 				  capture_width - 1, capture_height - 1);
 
-	/* Test 3x4 pixels in the center */
-	capture_buffer_test_empty(frame, red, green, blue,
-				  center_x - 1, center_y - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x, center_y - 2);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  center_x + 1, center_y - 2);
+	/* Test 16x16 pixels in the upper left corner */
+	capture_buffer_test_frame(frame, red, green, blue, 0, 0);
+	capture_buffer_test_frame(frame, red, green, blue, 15, 0);
+	capture_buffer_test_frame(frame, red, green, blue, 0, 15);
+	capture_buffer_test_frame(frame, red, green, blue, 15, 15);
 
+	/* Test 16x16 pixels in the upper right corner */
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x - 1, center_y - 1);
+				  capture_width - 16, 0);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x, center_y - 1);
+				  capture_width - 1, 0);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x + 1, center_y - 1);
+				  capture_width - 16, 15);
+	capture_buffer_test_frame(frame, red, green, blue,
+				  capture_width - 1, 15);
 
+	/* Test 16x16 pixels in the lower left corner */
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x - 1, center_y);
+				  0, capture_height - 16);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x, center_y);
+				  15, capture_height - 16);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x + 1, center_y);
+				  0, capture_height - 1);
+	capture_buffer_test_frame(frame, red, green, blue,
+				  15, capture_height - 1);
 
-	capture_buffer_test_empty(frame, red, green, blue,
-				  center_x - 1, center_y + 1);
+	/* Test 16x16 pixels in the lower right corner */
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x, center_y + 1);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  center_x + 1, center_y + 1);
+				  capture_width - 16, capture_height - 16);
+	capture_buffer_test_frame(frame, red, green, blue,
+				  capture_width - 1, capture_height - 16);
+	capture_buffer_test_frame(frame, red, green, blue,
+				  capture_width - 16, capture_height - 1);
+	capture_buffer_test_frame(frame, red, green, blue,
+				  capture_width - 1, capture_height - 1);
 
-	/* Test 3x2 pixels in the upper center */
+	/* Test 16x16 pixels in the center */
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x - 1, 0);
+				  center_x - 8, center_y - 8);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x, 0);
+				  center_x + 7, center_y - 8);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x + 1, 0);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  center_x - 1, 1);
+				  center_x - 8, center_y + 7);
 	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x, 1);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  center_x + 1, 1);
-
-	/* Test 3x2 pixels in the lower center */
-	capture_buffer_test_empty(frame, red, green, blue,
-				  center_x - 1, capture_height - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x, capture_height - 2);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  center_x + 1, capture_height - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x - 1, capture_height - 1);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x,  capture_height - 1);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  center_x + 1, capture_height - 1);
-
-	/* Test 2x4 pixels in the center left */
-	capture_buffer_test_frame(frame, red, green, blue,
-				  0, center_y - 2);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  1, center_y - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  0, center_y - 1);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  1, center_y - 1);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  0, center_y);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  1, center_y);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  0, center_y + 1);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  1, center_y + 1);
-
-	/* Test 2x4 pixels in the center left */
-	capture_buffer_test_empty(frame, red, green, blue,
-				  capture_width - 2, center_y - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 1, center_y - 2);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 2, center_y - 1);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 1, center_y - 1);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 2, center_y);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 1, center_y);
-	capture_buffer_test_empty(frame, red, green, blue,
-				  capture_width - 2, center_y + 1);
-	capture_buffer_test_frame(frame, red, green, blue,
-				  capture_width - 1, center_y + 1);
+				  center_x + 7, center_y + 7);
 }
 
 int
