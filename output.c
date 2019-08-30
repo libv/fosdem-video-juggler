@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <sysexits.h>
 
 #include <xf86drmMode.h>
 #include <drm_fourcc.h>
@@ -69,6 +70,24 @@ struct kms_output {
 	 */
 	struct kms_plane *plane_disable;
 };
+
+static void
+usage(const char *name)
+{
+	printf("Usage:\n");
+	printf("%s\n", name);
+	printf("Or:\n");
+	printf("%s  <framecount>\n", name);
+	printf("Or:\n");
+	printf("%s  <framecount>  <dotclock>  "
+	       "<hdisplay> <hsync_start> <hsync_end> <htotal>  "
+	       "<vdisplay> <vsync_start> <vsync_end> <vtotal> "
+	       "[+-]hsync [+-]vsync\n", name);
+	printf("The arguments are formated as an xfree86 modeline:\n");
+	printf("\t* dotclock is a float for MHz.\n");
+	printf("\t* The sync polarities are written out as '+vsync'.\n");
+	printf("\t* All other values are pixels positions, as integers.\n");
+}
 
 /*
  * Get all the desired planes in one go.
@@ -406,23 +425,39 @@ output_test_frame_set(struct kms_output *output, struct output_test *test,
 int main(int argc, char *argv[])
 {
 	struct kms_output *output;
-	struct _drmModeModeInfo *modeline;
+	struct _drmModeModeInfo *mode = NULL, *mode_old;
 	unsigned long count = 1000;
 	int ret, i, j;
+
+	if ((argc != 1) && (argc != 2) && (argc != 13)) {
+		usage(argv[0]);
+		return EX_USAGE;
+	}
 
 	if (argc > 1) {
 		ret = sscanf(argv[1], "%lu", &count);
 		if (ret != 1) {
 			fprintf(stderr, "%s: failed to fscanf(%s): %s\n",
 				__func__, argv[1], strerror(errno));
-			return -1;
+			usage(argv[0]);
+			return EX_USAGE;
 		}
 
 		if (count < 0)
 			count = 1000;
 	}
-
 	printf("Running for %lu frames.\n", count);
+
+	if (argc > 2) {
+		mode = kms_modeline_arguments_parse(argc - 2, &argv[2]);
+		if (!mode) {
+			usage(argv[0]);
+			return EX_USAGE;
+		}
+
+		printf("Mode parsed from the arguments list:\n  ");
+		kms_modeline_print(mode);
+	}
 
 	ret = kms_init();
 	if (ret)
@@ -459,11 +494,26 @@ int main(int argc, char *argv[])
 	       output->connector_id,
 	       kms_connector_string(DRM_MODE_CONNECTOR_HDMIA));
 
-	modeline = kms_crtc_modeline_get(output->crtc_id);
-	if (!modeline)
+	mode_old = kms_crtc_modeline_get(output->crtc_id);
+	if (!mode_old)
 		return -1;
-	kms_modeline_print(modeline);
-	free(modeline);
+	printf("Current mode:\n  ");
+	kms_modeline_print(mode_old);
+	free(mode_old);
+
+	if (mode) {
+		ret = kms_crtc_modeline_set(output->crtc_id, mode);
+		if (ret)
+			return ret;
+
+		mode_old = kms_crtc_modeline_get(output->crtc_id);
+		if (!mode_old)
+			return -1;
+
+		printf("New/updated mode:\n  ");
+		kms_modeline_print(mode_old);
+		free(mode_old);
+	}
 
 	ret = kms_output_planes_get(output);
 	if (ret)
