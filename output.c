@@ -406,6 +406,7 @@ output_test_frame_set(struct kms_output *output, struct output_test *test,
 int main(int argc, char *argv[])
 {
 	struct kms_output *output;
+	struct _drmModeModeInfo *modeline;
 	unsigned long count = 1000;
 	int ret, i, j;
 
@@ -457,7 +458,12 @@ int main(int argc, char *argv[])
 	       output->crtc_id, output->crtc_width, output->crtc_height,
 	       output->connector_id,
 	       kms_connector_string(DRM_MODE_CONNECTOR_HDMIA));
-	kms_crtc_modeline_print(output->crtc_id);
+
+	modeline = kms_crtc_modeline_get(output->crtc_id);
+	if (!modeline)
+		return -1;
+	kms_modeline_print(modeline);
+	free(modeline);
 
 	ret = kms_output_planes_get(output);
 	if (ret)

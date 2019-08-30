@@ -301,6 +301,7 @@ modeline_verify(struct _drmModeModeInfo *mode)
 int main(int argc, char *argv[])
 {
 	struct kms_modeset *modeset;
+	struct _drmModeModeInfo *old;
 	int ret;
 
 	ret = kms_init();
@@ -339,6 +340,13 @@ int main(int argc, char *argv[])
 			      &modeset->crtc_width, &modeset->crtc_height);
 	if (ret)
 		return ret;
+
+	old = kms_crtc_modeline_get(modeset->crtc_id);
+	if (!old)
+		return -1;
+
+	printf("Current mode:\n  ");
+	kms_modeline_print(old);
 
 	return 0;
 }

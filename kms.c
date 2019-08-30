@@ -330,11 +330,12 @@ kms_modeline_print(struct _drmModeModeInfo *mode)
 	       (mode->flags & DRM_MODE_FLAG_PVSYNC) ? '+' : '-');
 }
 
-int
-kms_crtc_modeline_print(uint32_t crtc_id)
+struct _drmModeModeInfo *
+kms_crtc_modeline_get(uint32_t crtc_id)
 {
 	drmModePropertyBlobRes *blob;
 	drmModeObjectProperties *properties;
+	struct _drmModeModeInfo *mode;
 	uint32_t blob_id;
 	int i;
 
@@ -346,10 +347,10 @@ kms_crtc_modeline_print(uint32_t crtc_id)
 			fprintf(stderr,
 				"%s(0x%02X): Failed to get properties: %s\n",
 				__func__, crtc_id, strerror(errno));
-			return errno;
+			return NULL;
 		}
 
-		return -1;
+		return NULL;
 	}
 
 	for (i = 0; i < (int) properties->count_props; i++) {
@@ -382,7 +383,7 @@ kms_crtc_modeline_print(uint32_t crtc_id)
 		fprintf(stderr, "%s(0x%02X): Failed to get MODE_ID property\n",
 			__func__, crtc_id);
 		drmModeFreeObjectProperties(properties);
-		return -1;
+		return NULL;
 	}
 
 	drmModeFreeObjectProperties(properties);
@@ -392,7 +393,7 @@ kms_crtc_modeline_print(uint32_t crtc_id)
 		fprintf(stderr, "%s(0x%02X): Failed to get property blob "
 			"%X: %s\n", __func__, crtc_id, blob_id,
 			strerror(errno));
-		return -1;
+		return NULL;
 	}
 
 	if (blob->length != sizeof(drmModeModeInfo)) {
@@ -400,14 +401,15 @@ kms_crtc_modeline_print(uint32_t crtc_id)
 			"%d should be %d\n", __func__, crtc_id,
 			blob->length, (int) sizeof(drmModeModeInfo));
 		drmModeFreePropertyBlob(blob);
-		return -1;
+		return NULL;
 	}
 
-	kms_modeline_print(blob->data);
+	mode = calloc(1, sizeof(struct _drmModeModeInfo));
+	memcpy(mode, blob->data, sizeof(struct _drmModeModeInfo));
 
 	drmModeFreePropertyBlob(blob);
 
-	return 0;
+	return mode;
 }
 
 struct kms_plane *
