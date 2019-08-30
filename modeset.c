@@ -156,6 +156,130 @@ modeline_parse(struct kms_modeset *modeset, int argc, char *argv[])
 	return 0;
 }
 
+static int
+modeline_verify(struct kms_modeset *modeset)
+{
+	float refresh;
+
+	if (modeset->dotclock < 1.0) {
+		fprintf(stderr, "Error: clock %2.2f is too low.\n",
+			modeset->dotclock);
+		return -1;
+	}
+
+	if (modeset->dotclock > 500.0) {
+		fprintf(stderr, "Error: clock %2.2f is too low.\n",
+			modeset->dotclock);
+		return -1;
+	}
+
+	if ((modeset->hdisplay <= 0) || (modeset->hdisplay > 4096)) {
+		fprintf(stderr, "Error: Invalid HDisplay %d\n",
+			modeset->hdisplay);
+		return -1;
+	}
+
+	if ((modeset->hsync_start <= 0) || (modeset->hsync_start > 4096)) {
+		fprintf(stderr, "Error: Invalid HSync Start %d\n",
+			modeset->hsync_start);
+		return -1;
+	}
+
+	if ((modeset->hsync_end <= 0) || (modeset->hsync_end > 4096)) {
+		fprintf(stderr, "Error: Invalid HSync End %d\n",
+			modeset->hsync_end);
+		return -1;
+	}
+
+	if ((modeset->htotal <= 0) || (modeset->htotal > 4096)) {
+		fprintf(stderr, "Error: Invalid HTotal %d\n",
+			modeset->htotal);
+		return -1;
+	}
+
+	if ((modeset->vdisplay <= 0) || (modeset->vdisplay > 4096)) {
+		fprintf(stderr, "Error: Invalid VDisplay %d\n",
+			modeset->vdisplay);
+		return -1;
+	}
+
+	if ((modeset->vsync_start <= 0) || (modeset->vsync_start > 4096)) {
+		fprintf(stderr, "Error: Invalid VSync Start %d\n",
+			modeset->vsync_start);
+		return -1;
+	}
+
+	if ((modeset->vsync_end <= 0) || (modeset->vsync_end > 4096)) {
+		fprintf(stderr, "Error: Invalid VSync End %d\n",
+			modeset->vsync_end);
+		return -1;
+	}
+
+	if ((modeset->vtotal <= 0) || (modeset->vtotal > 4096)) {
+		fprintf(stderr, "Error: Invalid VTotal %d\n",
+			modeset->vtotal);
+		return -1;
+	}
+
+	if (modeset->hdisplay > modeset->hsync_start) {
+		fprintf(stderr, "Error: HDisplay %d is above HSync Start %d\n",
+			modeset->hdisplay, modeset->hsync_start);
+		return -1;
+	}
+
+	if (modeset->hsync_start > modeset->hsync_end) {
+		fprintf(stderr, "Error: HSync Start %d is above HSync End %d\n",
+			modeset->hsync_start, modeset->hsync_end);
+		return -1;
+	}
+
+	if (modeset->hsync_end > modeset->htotal) {
+		fprintf(stderr, "Error: HSync End %d is above HTotal %d\n",
+			modeset->hsync_end, modeset->htotal);
+		return -1;
+	}
+
+	if (modeset->vdisplay > modeset->vsync_start) {
+		fprintf(stderr, "Error: VDisplay %d is above VSync Start %d\n",
+			modeset->vdisplay, modeset->vsync_start);
+		return -1;
+	}
+
+	if (modeset->vsync_start > modeset->vsync_end) {
+		fprintf(stderr, "Error: VSync Start %d is above VSync End %d\n",
+			modeset->vsync_start, modeset->vsync_end);
+		return -1;
+	}
+
+	if (modeset->vsync_end > modeset->vtotal) {
+		fprintf(stderr, "Error: VSync End %d is above VTotal %d\n",
+			modeset->vsync_end, modeset->vtotal);
+		return -1;
+	}
+
+	/*
+	 * Here we lock down the vertical refresh to around 60Hz, as we
+	 * do not want to run our displays too far from 60Hz, even when
+	 * playing with the timing.
+	 *
+	 */
+	refresh = (modeset->dotclock * 1000000.0) /
+		(modeset->htotal * modeset->vtotal);
+	if (refresh < 55.0) {
+		fprintf(stderr, "Error: refresh rate too low: %2.2f\n",
+			refresh);
+		return -1;
+	}
+
+	if (refresh > 65.0) {
+		fprintf(stderr, "Error: refresh rate too high: %2.2f\n",
+			refresh);
+		return -1;
+	}
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	struct kms_modeset *modeset;
@@ -170,6 +294,10 @@ int main(int argc, char *argv[])
 		return -ENOMEM;
 
 	ret = modeline_parse(modeset, argc, argv);
+	if (ret)
+		return ret;
+
+	ret = modeline_verify(modeset);
 	if (ret)
 		return ret;
 
