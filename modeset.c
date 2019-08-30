@@ -48,99 +48,110 @@ struct kms_modeset {
 	bool polarity_vsync;
 };
 
+static void
+usage(const char *name)
+{
+	printf("Usage:\n");
+	printf("%s  <dotclock>  "
+	       "<hdisplay> <hsync_start> <hsync_end> <htotal>  "
+	       "<vdisplay> <vsync_start> <vsync_end> <vtotal> "
+	       "[+-]hsync [+-]vsync\n", name);
+	printf("The arguments are formated as an xfree86 modeline:\n");
+	printf("\t* dotclock is a float for MHz.\n");
+	printf("\t* The sync polarities are written out as '+vsync'.\n");
+	printf("\t* All other values are pixels positions, as integers.\n");
+}
+
 static int
 modeline_parse(struct kms_modeset *modeset, int argc, char *argv[])
 {
 	int ret;
 
-	if (argc != 12) {
+	if (argc != 11) {
 		fprintf(stderr, "Error: not enough arguments.\n");
-		printf("Usage:\n");
-		printf("%s dotclock hdisplay hsync_start hsync_end htotal "
-		       "vdisplay vsync_start vsync_end vtotal\n", argv[0]);
 		return -1;
 	}
 
-	ret = sscanf(argv[1], "%f", &modeset->dotclock);
+	ret = sscanf(argv[0], "%f", &modeset->dotclock);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read dotclock from %s.\n",
+			argv[0]);
+		return -1;
+	}
+
+	ret = sscanf(argv[1], "%d", &modeset->hdisplay);
+	if (ret != 1) {
+		fprintf(stderr, "Failed to read hdisplay from %s.\n",
 			argv[1]);
 		return -1;
 	}
 
-	ret = sscanf(argv[2], "%d", &modeset->hdisplay);
+	ret = sscanf(argv[2], "%d", &modeset->hsync_start);
 	if (ret != 1) {
-		fprintf(stderr, "Failed to read hdisplay from %s.\n",
+		fprintf(stderr, "Failed to read hsync_start from %s.\n",
 			argv[2]);
 		return -1;
 	}
 
-	ret = sscanf(argv[3], "%d", &modeset->hsync_start);
+	ret = sscanf(argv[3], "%d", &modeset->hsync_end);
 	if (ret != 1) {
-		fprintf(stderr, "Failed to read hsync_start from %s.\n",
+		fprintf(stderr, "Failed to read hsync_end from %s.\n",
 			argv[3]);
 		return -1;
 	}
 
-	ret = sscanf(argv[4], "%d", &modeset->hsync_end);
+	ret = sscanf(argv[4], "%d", &modeset->htotal);
 	if (ret != 1) {
-		fprintf(stderr, "Failed to read hsync_end from %s.\n",
+		fprintf(stderr, "Failed to read htotal from %s.\n",
 			argv[4]);
 		return -1;
 	}
 
-	ret = sscanf(argv[5], "%d", &modeset->htotal);
+	ret = sscanf(argv[5], "%d", &modeset->vdisplay);
 	if (ret != 1) {
-		fprintf(stderr, "Failed to read htotal from %s.\n",
+		fprintf(stderr, "Failed to read vdisplay from %s.\n",
 			argv[5]);
 		return -1;
 	}
 
-	ret = sscanf(argv[6], "%d", &modeset->vdisplay);
+	ret = sscanf(argv[6], "%d", &modeset->vsync_start);
 	if (ret != 1) {
-		fprintf(stderr, "Failed to read vdisplay from %s.\n",
+		fprintf(stderr, "Failed to read vsync_start from %s.\n",
 			argv[6]);
 		return -1;
 	}
 
-	ret = sscanf(argv[7], "%d", &modeset->vsync_start);
+	ret = sscanf(argv[7], "%d", &modeset->vsync_end);
 	if (ret != 1) {
-		fprintf(stderr, "Failed to read vsync_start from %s.\n",
+		fprintf(stderr, "Failed to read vsync_end from %s.\n",
 			argv[7]);
 		return -1;
 	}
 
-	ret = sscanf(argv[8], "%d", &modeset->vsync_end);
+	ret = sscanf(argv[8], "%d", &modeset->vtotal);
 	if (ret != 1) {
-		fprintf(stderr, "Failed to read vsync_end from %s.\n",
+		fprintf(stderr, "Failed to read vtotal from %s.\n",
 			argv[8]);
 		return -1;
 	}
 
-	ret = sscanf(argv[9], "%d", &modeset->vtotal);
-	if (ret != 1) {
-		fprintf(stderr, "Failed to read vtotal from %s.\n",
+	if (!strcmp(argv[9], "+hsync"))
+		modeset->polarity_hsync = true;
+	else if (!strcmp(argv[9], "-hsync"))
+		modeset->polarity_hsync = false;
+	else {
+		fprintf(stderr, "Failed to read hsync polarity from %s.\n",
 			argv[9]);
 		return -1;
 	}
 
-	if (!strcmp(argv[10], "+hsync"))
-		modeset->polarity_hsync = true;
-	else if (!strcmp(argv[10], "-hsync"))
-		modeset->polarity_hsync = false;
-	else {
-		fprintf(stderr, "Failed to read hsync polarity from %s.\n",
-			argv[10]);
-		return -1;
-	}
-
-	if (!strcmp(argv[11], "+vsync"))
+	if (!strcmp(argv[10], "+vsync"))
 		modeset->polarity_vsync = true;
-	else if (!strcmp(argv[11], "-vsync"))
+	else if (!strcmp(argv[10], "-vsync"))
 		modeset->polarity_vsync = false;
 	else {
 		fprintf(stderr, "Failed to read vsync polarity from %s.\n",
-			argv[11]);
+			argv[10]);
 		return -1;
 	}
 
@@ -293,9 +304,11 @@ int main(int argc, char *argv[])
 	if (!modeset)
 		return -ENOMEM;
 
-	ret = modeline_parse(modeset, argc, argv);
-	if (ret)
+	ret = modeline_parse(modeset, argc - 1, &argv[1]);
+	if (ret) {
+		usage(argv[0]);
 		return ret;
+	}
 
 	ret = modeline_verify(modeset);
 	if (ret)
