@@ -19,6 +19,8 @@
  *
  * Tool to adjust and fine-tune a mode on the secondary CRTC.
  *
+ * Sadly, changes to the mode are not persistent, and get reverted the instant
+ * this application finishes.
  */
 #include <stdlib.h>
 #include <stdbool.h>
