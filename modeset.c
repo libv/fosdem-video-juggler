@@ -25,6 +25,7 @@
 #include <inttypes.h>
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <xf86drmMode.h>
 
@@ -43,6 +44,8 @@ struct kms_modeset {
 	float dotclock;
 	int hdisplay, hsync_start, hsync_end, htotal;
 	int vdisplay, vsync_start, vsync_end, vtotal;
+	bool polarity_hsync;
+	bool polarity_vsync;
 };
 
 static int
@@ -50,7 +53,7 @@ modeline_parse(struct kms_modeset *modeset, int argc, char *argv[])
 {
 	int ret;
 
-	if (argc != 10) {
+	if (argc != 12) {
 		fprintf(stderr, "Error: not enough arguments.\n");
 		printf("Usage:\n");
 		printf("%s dotclock hdisplay hsync_start hsync_end htotal "
@@ -121,12 +124,34 @@ modeline_parse(struct kms_modeset *modeset, int argc, char *argv[])
 		return -1;
 	}
 
-	printf("Modeline: %2.2f  %d %d %d %d  %d %d %d %d\n",
-	       modeset->dotclock,
+	if (!strcmp(argv[10], "+hsync"))
+		modeset->polarity_hsync = true;
+	else if (!strcmp(argv[10], "-hsync"))
+		modeset->polarity_hsync = false;
+	else {
+		fprintf(stderr, "Failed to read hsync polarity from %s.\n",
+			argv[10]);
+		return -1;
+	}
+
+	if (!strcmp(argv[11], "+vsync"))
+		modeset->polarity_vsync = true;
+	else if (!strcmp(argv[11], "-vsync"))
+		modeset->polarity_vsync = false;
+	else {
+		fprintf(stderr, "Failed to read vsync polarity from %s.\n",
+			argv[11]);
+		return -1;
+	}
+
+	printf("Parsed modeline: %2.2f  %d %d %d %d  %d %d %d %d "
+	       "%chsync %cvsync\n", modeset->dotclock,
 	       modeset->hdisplay, modeset->hsync_start,
 	       modeset->hsync_end, modeset->htotal,
 	       modeset->vdisplay, modeset->vsync_start,
-	       modeset->vsync_end, modeset->vtotal);
+	       modeset->vsync_end, modeset->vtotal,
+	       modeset->polarity_hsync ? '+' : '-',
+	       modeset->polarity_vsync ? '+' : '-');
 
 	return 0;
 }
