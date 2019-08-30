@@ -20,6 +20,7 @@
 
 struct capture_buffer;
 struct _drmModeAtomicReq;
+struct _drmModeModeInfo;
 
 extern int kms_fd;
 
@@ -67,6 +68,7 @@ int kms_connection_check(uint32_t connector_id, bool *connected,
 			 uint32_t *encoder_id);
 int kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
 		    int *width, int *height);
+void kms_modeline_print(struct _drmModeModeInfo *mode);
 int kms_crtc_modeline_print(uint32_t crtc_id);
 int kms_crtc_index_get(uint32_t id);
 

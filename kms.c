@@ -319,12 +319,21 @@ kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
 	return 0;
 }
 
+void
+kms_modeline_print(struct _drmModeModeInfo *mode)
+{
+	printf("Modeline  \"%s\"  %.2f  %d %d %d %d  %d %d %d %d  "
+	       "%chsync %cvsync\n", mode->name, mode->clock / 1000.0,
+	       mode->hdisplay, mode->hsync_start, mode->hsync_end, mode->htotal,
+	       mode->vdisplay, mode->vsync_start, mode->vsync_end, mode->vtotal,
+	       (mode->flags & DRM_MODE_FLAG_PHSYNC) ? '+' : '-',
+	       (mode->flags & DRM_MODE_FLAG_PVSYNC) ? '+' : '-');
+}
 
 int
 kms_crtc_modeline_print(uint32_t crtc_id)
 {
 	drmModePropertyBlobRes *blob;
-	drmModeModeInfo *mode = NULL;
 	drmModeObjectProperties *properties;
 	uint32_t blob_id;
 	int i;
@@ -394,14 +403,7 @@ kms_crtc_modeline_print(uint32_t crtc_id)
 		return -1;
 	}
 
-	mode = blob->data;
-
-	printf("Modeline  \"%s\"  %.2f  %d %d %d %d  %d %d %d %d  "
-	       "%chsync %cvsync\n", mode->name, mode->clock / 1000.0,
-	       mode->hdisplay, mode->hsync_start, mode->hsync_end, mode->htotal,
-	       mode->vdisplay, mode->vsync_start, mode->vsync_end, mode->vtotal,
-	       (mode->flags & DRM_MODE_FLAG_PHSYNC) ? '+' : '-',
-	       (mode->flags & DRM_MODE_FLAG_PVSYNC) ? '+' : '-');
+	kms_modeline_print(blob->data);
 
 	drmModeFreePropertyBlob(blob);
 

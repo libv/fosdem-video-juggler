@@ -41,11 +41,7 @@ struct kms_modeset {
 	int crtc_width;
 	int crtc_height;
 
-	float dotclock;
-	int hdisplay, hsync_start, hsync_end, htotal;
-	int vdisplay, vsync_start, vsync_end, vtotal;
-	bool polarity_hsync;
-	bool polarity_vsync;
+	struct _drmModeModeInfo mode[1];
 };
 
 static void
@@ -63,208 +59,219 @@ usage(const char *name)
 }
 
 static int
-modeline_parse(struct kms_modeset *modeset, int argc, char *argv[])
+modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 {
-	int ret;
+	float dotclock, refresh;
+	int ret, val;
 
 	if (argc != 11) {
 		fprintf(stderr, "Error: not enough arguments.\n");
 		return -1;
 	}
 
-	ret = sscanf(argv[0], "%f", &modeset->dotclock);
+	ret = sscanf(argv[0], "%f", &dotclock);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read dotclock from %s.\n",
 			argv[0]);
 		return -1;
 	}
+	mode->clock = dotclock * 1000;
 
-	ret = sscanf(argv[1], "%d", &modeset->hdisplay);
+
+	ret = sscanf(argv[1], "%d", &val);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read hdisplay from %s.\n",
 			argv[1]);
 		return -1;
 	}
+	mode->hdisplay = val;
 
-	ret = sscanf(argv[2], "%d", &modeset->hsync_start);
+	ret = sscanf(argv[2], "%d", &val);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read hsync_start from %s.\n",
 			argv[2]);
 		return -1;
 	}
+	mode->hsync_start = val;
 
-	ret = sscanf(argv[3], "%d", &modeset->hsync_end);
+	ret = sscanf(argv[3], "%d", &val);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read hsync_end from %s.\n",
 			argv[3]);
 		return -1;
 	}
+	mode->hsync_end = val;
 
-	ret = sscanf(argv[4], "%d", &modeset->htotal);
+	ret = sscanf(argv[4], "%d", &val);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read htotal from %s.\n",
 			argv[4]);
 		return -1;
 	}
+	mode->htotal = val;
 
-	ret = sscanf(argv[5], "%d", &modeset->vdisplay);
+	ret = sscanf(argv[5], "%d", &val);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read vdisplay from %s.\n",
 			argv[5]);
 		return -1;
 	}
+	mode->vdisplay = val;
 
-	ret = sscanf(argv[6], "%d", &modeset->vsync_start);
+	ret = sscanf(argv[6], "%d", &val);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read vsync_start from %s.\n",
 			argv[6]);
 		return -1;
 	}
+	mode->vsync_start = val;
 
-	ret = sscanf(argv[7], "%d", &modeset->vsync_end);
+	ret = sscanf(argv[7], "%d", &val);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read vsync_end from %s.\n",
 			argv[7]);
 		return -1;
 	}
+	mode->vsync_end = val;
 
-	ret = sscanf(argv[8], "%d", &modeset->vtotal);
+	ret = sscanf(argv[8], "%d", &val);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read vtotal from %s.\n",
 			argv[8]);
 		return -1;
 	}
+	mode->vtotal = val;
 
+	mode->flags &= ~0x03;
 	if (!strcmp(argv[9], "+hsync"))
-		modeset->polarity_hsync = true;
+		mode->flags |= DRM_MODE_FLAG_PHSYNC;
 	else if (!strcmp(argv[9], "-hsync"))
-		modeset->polarity_hsync = false;
+		mode->flags |= DRM_MODE_FLAG_NHSYNC;
 	else {
 		fprintf(stderr, "Failed to read hsync polarity from %s.\n",
 			argv[9]);
 		return -1;
 	}
 
+	mode->flags &= ~0x0C;
 	if (!strcmp(argv[10], "+vsync"))
-		modeset->polarity_vsync = true;
+		mode->flags |= DRM_MODE_FLAG_PVSYNC;
 	else if (!strcmp(argv[10], "-vsync"))
-		modeset->polarity_vsync = false;
+		mode->flags |= DRM_MODE_FLAG_NVSYNC;
 	else {
 		fprintf(stderr, "Failed to read vsync polarity from %s.\n",
 			argv[10]);
 		return -1;
 	}
 
-	printf("Parsed modeline: %2.2f  %d %d %d %d  %d %d %d %d "
-	       "%chsync %cvsync\n", modeset->dotclock,
-	       modeset->hdisplay, modeset->hsync_start,
-	       modeset->hsync_end, modeset->htotal,
-	       modeset->vdisplay, modeset->vsync_start,
-	       modeset->vsync_end, modeset->vtotal,
-	       modeset->polarity_hsync ? '+' : '-',
-	       modeset->polarity_vsync ? '+' : '-');
+	refresh = (mode->clock * 1000.0) /
+		(mode->htotal * mode->vtotal);
+
+	snprintf(mode->name, DRM_DISPLAY_MODE_LEN, "%dx%d@%2.2fHz",
+		 mode->hdisplay, mode->vdisplay, refresh);
+	mode->vrefresh = refresh;
 
 	return 0;
 }
 
 static int
-modeline_verify(struct kms_modeset *modeset)
+modeline_verify(struct _drmModeModeInfo *mode)
 {
 	float refresh;
 
-	if (modeset->dotclock < 1.0) {
+	if (mode->clock < 1000.0) {
 		fprintf(stderr, "Error: clock %2.2f is too low.\n",
-			modeset->dotclock);
+			mode->clock / 1000.0);
 		return -1;
 	}
 
-	if (modeset->dotclock > 500.0) {
+	if (mode->clock > 500000.0) {
 		fprintf(stderr, "Error: clock %2.2f is too low.\n",
-			modeset->dotclock);
+			mode->clock / 1000.0);
 		return -1;
 	}
 
-	if ((modeset->hdisplay <= 0) || (modeset->hdisplay > 4096)) {
+	if ((mode->hdisplay <= 0) || (mode->hdisplay > 4096)) {
 		fprintf(stderr, "Error: Invalid HDisplay %d\n",
-			modeset->hdisplay);
+			mode->hdisplay);
 		return -1;
 	}
 
-	if ((modeset->hsync_start <= 0) || (modeset->hsync_start > 4096)) {
+	if ((mode->hsync_start <= 0) || (mode->hsync_start > 4096)) {
 		fprintf(stderr, "Error: Invalid HSync Start %d\n",
-			modeset->hsync_start);
+			mode->hsync_start);
 		return -1;
 	}
 
-	if ((modeset->hsync_end <= 0) || (modeset->hsync_end > 4096)) {
+	if ((mode->hsync_end <= 0) || (mode->hsync_end > 4096)) {
 		fprintf(stderr, "Error: Invalid HSync End %d\n",
-			modeset->hsync_end);
+			mode->hsync_end);
 		return -1;
 	}
 
-	if ((modeset->htotal <= 0) || (modeset->htotal > 4096)) {
+	if ((mode->htotal <= 0) || (mode->htotal > 4096)) {
 		fprintf(stderr, "Error: Invalid HTotal %d\n",
-			modeset->htotal);
+			mode->htotal);
 		return -1;
 	}
 
-	if ((modeset->vdisplay <= 0) || (modeset->vdisplay > 4096)) {
+	if ((mode->vdisplay <= 0) || (mode->vdisplay > 4096)) {
 		fprintf(stderr, "Error: Invalid VDisplay %d\n",
-			modeset->vdisplay);
+			mode->vdisplay);
 		return -1;
 	}
 
-	if ((modeset->vsync_start <= 0) || (modeset->vsync_start > 4096)) {
+	if ((mode->vsync_start <= 0) || (mode->vsync_start > 4096)) {
 		fprintf(stderr, "Error: Invalid VSync Start %d\n",
-			modeset->vsync_start);
+			mode->vsync_start);
 		return -1;
 	}
 
-	if ((modeset->vsync_end <= 0) || (modeset->vsync_end > 4096)) {
+	if ((mode->vsync_end <= 0) || (mode->vsync_end > 4096)) {
 		fprintf(stderr, "Error: Invalid VSync End %d\n",
-			modeset->vsync_end);
+			mode->vsync_end);
 		return -1;
 	}
 
-	if ((modeset->vtotal <= 0) || (modeset->vtotal > 4096)) {
+	if ((mode->vtotal <= 0) || (mode->vtotal > 4096)) {
 		fprintf(stderr, "Error: Invalid VTotal %d\n",
-			modeset->vtotal);
+			mode->vtotal);
 		return -1;
 	}
 
-	if (modeset->hdisplay > modeset->hsync_start) {
+	if (mode->hdisplay > mode->hsync_start) {
 		fprintf(stderr, "Error: HDisplay %d is above HSync Start %d\n",
-			modeset->hdisplay, modeset->hsync_start);
+			mode->hdisplay, mode->hsync_start);
 		return -1;
 	}
 
-	if (modeset->hsync_start > modeset->hsync_end) {
+	if (mode->hsync_start > mode->hsync_end) {
 		fprintf(stderr, "Error: HSync Start %d is above HSync End %d\n",
-			modeset->hsync_start, modeset->hsync_end);
+			mode->hsync_start, mode->hsync_end);
 		return -1;
 	}
 
-	if (modeset->hsync_end > modeset->htotal) {
+	if (mode->hsync_end > mode->htotal) {
 		fprintf(stderr, "Error: HSync End %d is above HTotal %d\n",
-			modeset->hsync_end, modeset->htotal);
+			mode->hsync_end, mode->htotal);
 		return -1;
 	}
 
-	if (modeset->vdisplay > modeset->vsync_start) {
+	if (mode->vdisplay > mode->vsync_start) {
 		fprintf(stderr, "Error: VDisplay %d is above VSync Start %d\n",
-			modeset->vdisplay, modeset->vsync_start);
+			mode->vdisplay, mode->vsync_start);
 		return -1;
 	}
 
-	if (modeset->vsync_start > modeset->vsync_end) {
+	if (mode->vsync_start > mode->vsync_end) {
 		fprintf(stderr, "Error: VSync Start %d is above VSync End %d\n",
-			modeset->vsync_start, modeset->vsync_end);
+			mode->vsync_start, mode->vsync_end);
 		return -1;
 	}
 
-	if (modeset->vsync_end > modeset->vtotal) {
+	if (mode->vsync_end > mode->vtotal) {
 		fprintf(stderr, "Error: VSync End %d is above VTotal %d\n",
-			modeset->vsync_end, modeset->vtotal);
+			mode->vsync_end, mode->vtotal);
 		return -1;
 	}
 
@@ -274,8 +281,8 @@ modeline_verify(struct kms_modeset *modeset)
 	 * playing with the timing.
 	 *
 	 */
-	refresh = (modeset->dotclock * 1000000.0) /
-		(modeset->htotal * modeset->vtotal);
+	refresh = (mode->clock * 1000.0) /
+		(mode->htotal * mode->vtotal);
 	if (refresh < 55.0) {
 		fprintf(stderr, "Error: refresh rate too low: %2.2f\n",
 			refresh);
@@ -304,15 +311,18 @@ int main(int argc, char *argv[])
 	if (!modeset)
 		return -ENOMEM;
 
-	ret = modeline_parse(modeset, argc - 1, &argv[1]);
+	ret = modeline_parse(modeset->mode, argc - 1, &argv[1]);
 	if (ret) {
 		usage(argv[0]);
 		return ret;
 	}
 
-	ret = modeline_verify(modeset);
+	ret = modeline_verify(modeset->mode);
 	if (ret)
 		return ret;
+
+	printf("Mode parsed from the arguments list:\n  ");
+	kms_modeline_print(modeset->mode);
 
 	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_HDMIA,
 				   &modeset->connector_id);
