@@ -40,8 +40,6 @@ struct kms_modeset {
 	uint32_t crtc_id;
 	int crtc_width;
 	int crtc_height;
-
-	struct _drmModeModeInfo mode[1];
 };
 
 static void
@@ -58,22 +56,30 @@ usage(const char *name)
 	printf("\t* All other values are pixels positions, as integers.\n");
 }
 
-static int
-modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
+static struct _drmModeModeInfo *
+modeline_parse(int argc, char *argv[])
 {
+	struct _drmModeModeInfo *mode;
 	float dotclock, refresh;
 	int ret, val;
 
 	if (argc != 11) {
 		fprintf(stderr, "Error: not enough arguments.\n");
-		return -1;
+		return NULL;
+	}
+
+	mode = calloc(1, sizeof(struct _drmModeModeInfo));
+	if (!mode) {
+		fprintf(stderr, "%s(): failed to allocated mode.\n",
+			__func__);
+		return NULL;
 	}
 
 	ret = sscanf(argv[0], "%f", &dotclock);
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read dotclock from %s.\n",
 			argv[0]);
-		return -1;
+		goto error;
 	}
 	mode->clock = dotclock * 1000;
 
@@ -82,7 +88,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read hdisplay from %s.\n",
 			argv[1]);
-		return -1;
+		goto error;
 	}
 	mode->hdisplay = val;
 
@@ -90,7 +96,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read hsync_start from %s.\n",
 			argv[2]);
-		return -1;
+		goto error;
 	}
 	mode->hsync_start = val;
 
@@ -98,7 +104,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read hsync_end from %s.\n",
 			argv[3]);
-		return -1;
+		goto error;
 	}
 	mode->hsync_end = val;
 
@@ -106,7 +112,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read htotal from %s.\n",
 			argv[4]);
-		return -1;
+		goto error;
 	}
 	mode->htotal = val;
 
@@ -114,7 +120,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read vdisplay from %s.\n",
 			argv[5]);
-		return -1;
+		goto error;
 	}
 	mode->vdisplay = val;
 
@@ -122,7 +128,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read vsync_start from %s.\n",
 			argv[6]);
-		return -1;
+		goto error;
 	}
 	mode->vsync_start = val;
 
@@ -130,7 +136,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read vsync_end from %s.\n",
 			argv[7]);
-		return -1;
+		goto error;
 	}
 	mode->vsync_end = val;
 
@@ -138,7 +144,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	if (ret != 1) {
 		fprintf(stderr, "Failed to read vtotal from %s.\n",
 			argv[8]);
-		return -1;
+		goto error;
 	}
 	mode->vtotal = val;
 
@@ -150,7 +156,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	else {
 		fprintf(stderr, "Failed to read hsync polarity from %s.\n",
 			argv[9]);
-		return -1;
+		goto error;
 	}
 
 	mode->flags &= ~0x0C;
@@ -161,7 +167,7 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 	else {
 		fprintf(stderr, "Failed to read vsync polarity from %s.\n",
 			argv[10]);
-		return -1;
+		goto error;
 	}
 
 	refresh = (mode->clock * 1000.0) /
@@ -171,108 +177,100 @@ modeline_parse(struct _drmModeModeInfo *mode, int argc, char *argv[])
 		 mode->hdisplay, mode->vdisplay, refresh);
 	mode->vrefresh = refresh;
 
-	return 0;
-}
-
-static int
-modeline_verify(struct _drmModeModeInfo *mode)
-{
-	float refresh;
-
 	if (mode->clock < 1000.0) {
 		fprintf(stderr, "Error: clock %2.2f is too low.\n",
 			mode->clock / 1000.0);
-		return -1;
+		goto error;
 	}
 
 	if (mode->clock > 500000.0) {
 		fprintf(stderr, "Error: clock %2.2f is too low.\n",
 			mode->clock / 1000.0);
-		return -1;
+		goto error;
 	}
 
 	if ((mode->hdisplay <= 0) || (mode->hdisplay > 4096)) {
 		fprintf(stderr, "Error: Invalid HDisplay %d\n",
 			mode->hdisplay);
-		return -1;
+		goto error;
 	}
 
 	if ((mode->hsync_start <= 0) || (mode->hsync_start > 4096)) {
 		fprintf(stderr, "Error: Invalid HSync Start %d\n",
 			mode->hsync_start);
-		return -1;
+		goto error;
 	}
 
 	if ((mode->hsync_end <= 0) || (mode->hsync_end > 4096)) {
 		fprintf(stderr, "Error: Invalid HSync End %d\n",
 			mode->hsync_end);
-		return -1;
+		goto error;
 	}
 
 	if ((mode->htotal <= 0) || (mode->htotal > 4096)) {
 		fprintf(stderr, "Error: Invalid HTotal %d\n",
 			mode->htotal);
-		return -1;
+		goto error;
 	}
 
 	if ((mode->vdisplay <= 0) || (mode->vdisplay > 4096)) {
 		fprintf(stderr, "Error: Invalid VDisplay %d\n",
 			mode->vdisplay);
-		return -1;
+		goto error;
 	}
 
 	if ((mode->vsync_start <= 0) || (mode->vsync_start > 4096)) {
 		fprintf(stderr, "Error: Invalid VSync Start %d\n",
 			mode->vsync_start);
-		return -1;
+		goto error;
 	}
 
 	if ((mode->vsync_end <= 0) || (mode->vsync_end > 4096)) {
 		fprintf(stderr, "Error: Invalid VSync End %d\n",
 			mode->vsync_end);
-		return -1;
+		goto error;
 	}
 
 	if ((mode->vtotal <= 0) || (mode->vtotal > 4096)) {
 		fprintf(stderr, "Error: Invalid VTotal %d\n",
 			mode->vtotal);
-		return -1;
+		goto error;
 	}
 
 	if (mode->hdisplay > mode->hsync_start) {
 		fprintf(stderr, "Error: HDisplay %d is above HSync Start %d\n",
 			mode->hdisplay, mode->hsync_start);
-		return -1;
+		goto error;
 	}
 
 	if (mode->hsync_start > mode->hsync_end) {
 		fprintf(stderr, "Error: HSync Start %d is above HSync End %d\n",
 			mode->hsync_start, mode->hsync_end);
-		return -1;
+		goto error;
 	}
 
 	if (mode->hsync_end > mode->htotal) {
 		fprintf(stderr, "Error: HSync End %d is above HTotal %d\n",
 			mode->hsync_end, mode->htotal);
-		return -1;
+		goto error;
 	}
 
 	if (mode->vdisplay > mode->vsync_start) {
 		fprintf(stderr, "Error: VDisplay %d is above VSync Start %d\n",
 			mode->vdisplay, mode->vsync_start);
-		return -1;
+		goto error;
 	}
 
 	if (mode->vsync_start > mode->vsync_end) {
 		fprintf(stderr, "Error: VSync Start %d is above VSync End %d\n",
 			mode->vsync_start, mode->vsync_end);
-		return -1;
+		goto error;
 	}
 
 	if (mode->vsync_end > mode->vtotal) {
 		fprintf(stderr, "Error: VSync End %d is above VTotal %d\n",
 			mode->vsync_end, mode->vtotal);
-		return -1;
+		goto error;
 	}
 
 	/*
@@ -281,27 +279,29 @@ modeline_verify(struct _drmModeModeInfo *mode)
 	 * playing with the timing.
 	 *
 	 */
-	refresh = (mode->clock * 1000.0) /
-		(mode->htotal * mode->vtotal);
 	if (refresh < 55.0) {
 		fprintf(stderr, "Error: refresh rate too low: %2.2f\n",
 			refresh);
-		return -1;
+		goto error;
 	}
 
 	if (refresh > 65.0) {
 		fprintf(stderr, "Error: refresh rate too high: %2.2f\n",
 			refresh);
-		return -1;
+		goto error;
 	}
 
-	return 0;
+	return mode;
+
+ error:
+	free(mode);
+	return NULL;
 }
 
 int main(int argc, char *argv[])
 {
 	struct kms_modeset *modeset;
-	struct _drmModeModeInfo *old;
+	struct _drmModeModeInfo *mode, *old;
 	int ret;
 
 	ret = kms_init();
@@ -312,18 +312,14 @@ int main(int argc, char *argv[])
 	if (!modeset)
 		return -ENOMEM;
 
-	ret = modeline_parse(modeset->mode, argc - 1, &argv[1]);
-	if (ret) {
+	mode = modeline_parse(argc - 1, &argv[1]);
+	if (!mode) {
 		usage(argv[0]);
 		return ret;
 	}
 
-	ret = modeline_verify(modeset->mode);
-	if (ret)
-		return ret;
-
 	printf("Mode parsed from the arguments list:\n  ");
-	kms_modeline_print(modeset->mode);
+	kms_modeline_print(mode);
 
 	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_HDMIA,
 				   &modeset->connector_id);
@@ -349,7 +345,7 @@ int main(int argc, char *argv[])
 	kms_modeline_print(old);
 	free(old);
 
-	ret = kms_crtc_modeline_set(modeset->crtc_id, modeset->mode);
+	ret = kms_crtc_modeline_set(modeset->crtc_id, mode);
 	if (ret)
 		return ret;
 
