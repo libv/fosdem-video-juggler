@@ -68,6 +68,8 @@ int kms_connection_check(uint32_t connector_id, bool *connected,
 			 uint32_t *encoder_id);
 int kms_crtc_id_get(uint32_t encoder_id, uint32_t *crtc_id, bool *ok,
 		    int *width, int *height);
+
+struct _drmModeModeInfo *kms_modeline_arguments_parse(int argc, char *argv[]);
 void kms_modeline_print(struct _drmModeModeInfo *mode);
 struct _drmModeModeInfo *kms_crtc_modeline_get(uint32_t crtc_id);
 int kms_crtc_modeline_set(uint32_t crtc_id, struct _drmModeModeInfo *mode);
