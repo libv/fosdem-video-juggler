@@ -412,6 +412,86 @@ kms_crtc_modeline_get(uint32_t crtc_id)
 	return mode;
 }
 
+int
+kms_crtc_modeline_set(uint32_t crtc_id, struct _drmModeModeInfo *mode)
+{
+	drmModeObjectProperties *properties;
+	drmModeAtomicReqPtr request;
+	uint32_t prop_id, blob_id;
+	int i, ret;
+
+	properties = drmModeObjectGetProperties(kms_fd, crtc_id,
+						DRM_MODE_OBJECT_CRTC);
+	if (!properties) {
+		/* yes, if there are no properties, this returns EINVAL */
+		if (errno != EINVAL) {
+			fprintf(stderr,
+				"%s(0x%02X): Failed to get properties: %s\n",
+				__func__, crtc_id, strerror(errno));
+			return -errno;
+		}
+
+		return -1;
+	}
+
+	for (i = 0; i < (int) properties->count_props; i++) {
+		drmModePropertyRes *property;
+
+		property = drmModeGetProperty(kms_fd,
+					      properties->props[i]);
+		if (!property) {
+			fprintf(stderr, "%s(0x%02X): Failed to get property"
+				" %u: %s\n", __func__, crtc_id,
+				properties->props[i], strerror(errno));
+			continue;
+		}
+
+		if (!strcmp(property->name, "MODE_ID")) {
+			prop_id = property->prop_id;
+			drmModeFreeProperty(property);
+			break;
+		}
+
+		drmModeFreeProperty(property);
+	}
+
+	if (i == (int) properties->count_props) {
+		fprintf(stderr, "%s(0x%02X): Failed to get MODE_ID property\n",
+			__func__, crtc_id);
+		drmModeFreeObjectProperties(properties);
+		return -1;
+	}
+
+	drmModeFreeObjectProperties(properties);
+
+	ret = drmModeCreatePropertyBlob(kms_fd, mode,
+					sizeof(struct _drmModeModeInfo),
+					&blob_id);
+	if (ret) {
+		fprintf(stderr,  "%s(0x%02X): Failed to get PropertyBlob: %s\n",
+			__func__, crtc_id, strerror(errno));
+		return ret;
+	}
+
+	request = drmModeAtomicAlloc();
+
+	drmModeAtomicAddProperty(request, crtc_id, prop_id, blob_id);
+
+	ret = drmModeAtomicCommit(kms_fd, request,
+				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+
+	drmModeAtomicFree(request);
+	drmModeDestroyPropertyBlob(kms_fd, blob_id);
+
+	if (ret) {
+		fprintf(stderr, "%s(0x%02X): failed to set mode blob: %s\n",
+			__func__, crtc_id, strerror(errno));
+		return ret;
+	}
+
+	return 0;
+}
+
 struct kms_plane *
 kms_plane_create(uint32_t plane_id)
 {

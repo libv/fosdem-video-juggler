@@ -347,6 +347,18 @@ int main(int argc, char *argv[])
 
 	printf("Current mode:\n  ");
 	kms_modeline_print(old);
+	free(old);
+
+	ret = kms_crtc_modeline_set(modeset->crtc_id, modeset->mode);
+	if (ret)
+		return ret;
+
+	old = kms_crtc_modeline_get(modeset->crtc_id);
+	if (!old)
+		return -1;
+
+	printf("New/updated mode:\n  ");
+	kms_modeline_print(old);
 
 	return 0;
 }
