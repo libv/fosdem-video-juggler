@@ -452,7 +452,11 @@ int main(int argc, char *argv[])
 		return ret;
 
 	for (i = 0 ; i < count; i++) {
-		drmModeAtomicReqPtr request = drmModeAtomicAlloc();
+		drmModeAtomicReqPtr request;
+
+		printf("\rShowing frame %8d/%ld,", i, count);
+
+		request = drmModeAtomicAlloc();
 
 		if (!output->plane_background->active)
 			kms_output_background_set(output, request);
@@ -475,6 +479,8 @@ int main(int argc, char *argv[])
 			return ret;
 		}
 	}
+
+	printf("\nDone!\n");
 
 	return 0;
 }
