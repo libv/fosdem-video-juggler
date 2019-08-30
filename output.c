@@ -513,6 +513,10 @@ int main(int argc, char *argv[])
 		printf("New/updated mode:\n  ");
 		kms_modeline_print(mode_old);
 		free(mode_old);
+
+		printf("Waiting for monitor to catch up with the new mode...");
+		sleep(2);
+		printf(" Done.\n");
 	}
 
 	ret = kms_output_planes_get(output);
