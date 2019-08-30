@@ -235,12 +235,12 @@ output_test_buffer_fill(void *buffer, int x, int y, int w, int h, int pitch)
 	green = y;
 	for (j = 0; j < h; j++) {
 		uint32_t *p = (uint32_t *) line;
-		uint8_t red = x;
+		uint8_t blue = x;
 
 		for (i = 0; i < w; i++) {
-			*p = 0xFF000000 | (green << 8) | red;
+			*p = 0xFF000000 | (green << 8) | blue;
 			p++;
-			red++;
+			blue++;
 		}
 
 		line += pitch;
@@ -322,6 +322,27 @@ kms_output_tests_init(struct kms_output *output)
 		return ret;
 
 	return 0;
+}
+
+static void
+output_test_frame_update(struct output_test *test, int frame)
+{
+	struct kms_buffer *buffer = test->buffers[frame & 0x01];
+	uint8_t *line;
+	uint8_t red = frame;
+	int i, j;
+
+	line = buffer->map + 2;
+	for (j = 0; j < test->h; j++) {
+		uint8_t *p = line;
+
+		for (i = 0; i < test->w; i++) {
+			*p = red;
+			p += 4;
+		}
+
+		line += buffer->pitch;
+	}
 }
 
 static void
@@ -464,9 +485,11 @@ int main(int argc, char *argv[])
 		if (output->plane_disable && output->plane_disable->active)
 			kms_plane_disable(output->plane_disable, request);
 
-		for (j = 0; j < OUTPUT_TEST_COUNT; j++)
+		for (j = 0; j < OUTPUT_TEST_COUNT; j++) {
+			output_test_frame_update(output->tests[j], i);
 			output_test_frame_set(output, output->tests[j],
 					      request, i);
+		}
 
 		ret = drmModeAtomicCommit(kms_fd, request,
 					  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
