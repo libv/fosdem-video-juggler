@@ -145,6 +145,65 @@ v4l2_format_get(void)
 	return 0;
 }
 
+#define SUN4I_CSI1_HDISPLAY_START (V4L2_CID_USER_BASE + 0xC000 + 1)
+#define SUN4I_CSI1_VDISPLAY_START (V4L2_CID_USER_BASE + 0xC000 + 2)
+
+static int
+v4l2_controls_get(void)
+{
+	struct v4l2_queryctrl hquery[1] = {{
+			.id = SUN4I_CSI1_HDISPLAY_START,
+		}};
+	struct v4l2_control hctrl[1] = {{
+			.id = SUN4I_CSI1_HDISPLAY_START,
+		}};
+	struct v4l2_queryctrl vquery[1] = {{
+			.id = SUN4I_CSI1_VDISPLAY_START,
+		}};
+	struct v4l2_control vctrl[1] = {{
+			.id = SUN4I_CSI1_VDISPLAY_START,
+		}};
+	int ret;
+
+	ret = ioctl(capture_fd, VIDIOC_QUERYCTRL, hquery);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_QUERYCTRL) failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+	ret = ioctl(capture_fd, VIDIOC_G_CTRL, hctrl);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_G_CTRL) failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+	printf("Control \"%s\":  %d vs %d [%d-%d]\n", hquery->name,
+	       hctrl->value, hquery->default_value, hquery->minimum,
+	       hquery->maximum);
+
+	ret = ioctl(capture_fd, VIDIOC_QUERYCTRL, vquery);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_QUERYCTRL) failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+	ret = ioctl(capture_fd, VIDIOC_G_CTRL, vctrl);
+	if (ret) {
+		fprintf(stderr, "Error: ioctl(VIDIOC_G_CTRL) failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+	printf("Control \"%s\":  %d vs %d [%d-%d]\n", vquery->name,
+	       vctrl->value, vquery->default_value, vquery->minimum,
+	       vquery->maximum);
+
+	return 0;
+}
+
 /*
  * Again, assuming that all planes have the same size.
  */
@@ -579,6 +638,10 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	ret = v4l2_format_get();
+	if (ret)
+		return NULL;
+
+	ret = v4l2_controls_get();
 	if (ret)
 		return NULL;
 
