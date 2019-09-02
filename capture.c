@@ -52,6 +52,8 @@ int capture_height;
 size_t capture_pitch;
 size_t capture_plane_size;
 uint32_t capture_fourcc;
+int capture_hoffset = -1;
+int capture_voffset = -1;
 
 int capture_frame_offset = -1;
 
@@ -149,7 +151,7 @@ v4l2_format_get(void)
 #define SUN4I_CSI1_VDISPLAY_START (V4L2_CID_USER_BASE + 0xC000 + 2)
 
 static int
-v4l2_controls_get(void)
+v4l2_hv_offsets_set(void)
 {
 	struct v4l2_queryctrl hquery[1] = {{
 			.id = SUN4I_CSI1_HDISPLAY_START,
@@ -183,6 +185,25 @@ v4l2_controls_get(void)
 	       hctrl->value, hquery->default_value, hquery->minimum,
 	       hquery->maximum);
 
+	if (capture_hoffset == -1) {
+		capture_hoffset = hctrl->value;
+	} else if ((capture_hoffset < hquery->minimum) ||
+		   (capture_hoffset > hquery->maximum)) {
+		fprintf(stderr, "%s(): h offset out of range: %d\n",
+			__func__, capture_hoffset);
+	} else {
+		hctrl->value = capture_hoffset;
+
+		ret = ioctl(capture_fd, VIDIOC_S_CTRL, hctrl);
+		if (ret)
+			fprintf(stderr,
+				"Error: ioctl(VIDIOC_S_CTRL) failed: %s\n",
+				strerror(errno));
+		else
+			printf("Control \"%s\": set to %d\n", hquery->name,
+			       capture_hoffset);
+	}
+
 	ret = ioctl(capture_fd, VIDIOC_QUERYCTRL, vquery);
 	if (ret) {
 		fprintf(stderr, "Error: ioctl(VIDIOC_QUERYCTRL) failed: %s\n",
@@ -200,6 +221,25 @@ v4l2_controls_get(void)
 	printf("Control \"%s\":  %d vs %d [%d-%d]\n", vquery->name,
 	       vctrl->value, vquery->default_value, vquery->minimum,
 	       vquery->maximum);
+
+	if (capture_voffset == -1) {
+		capture_voffset = vctrl->value;
+	} else if ((capture_voffset < vquery->minimum) ||
+		   (capture_voffset > vquery->maximum)) {
+		fprintf(stderr, "%s(): v offset out of range: %d\n",
+			__func__, capture_voffset);
+	} else {
+		vctrl->value = capture_voffset;
+
+		ret = ioctl(capture_fd, VIDIOC_S_CTRL, vctrl);
+		if (ret)
+			fprintf(stderr,
+				"Error: ioctl(VIDIOC_S_CTRL) failed: %s\n",
+				strerror(errno));
+		else
+			printf("Control \"%s\": set to %d\n", vquery->name,
+			       capture_voffset);
+	}
 
 	return 0;
 }
@@ -641,7 +681,7 @@ capture_thread_handler(void *arg)
 	if (ret)
 		return NULL;
 
-	ret = v4l2_controls_get();
+	ret = v4l2_hv_offsets_set();
 	if (ret)
 		return NULL;
 
@@ -690,9 +730,12 @@ capture_thread_handler(void *arg)
 }
 
 int
-capture_init(unsigned long count)
+capture_init(unsigned long count, int hoffset, int voffset)
 {
 	int ret;
+
+	capture_hoffset = hoffset;
+	capture_voffset = voffset;
 
 	ret = pthread_create(capture_thread, NULL, capture_thread_handler,
 			     (void *) count);

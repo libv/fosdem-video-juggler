@@ -31,18 +31,36 @@
 int main(int argc, char *argv[])
 {
 	unsigned long count = 1000;
+	unsigned int hoffset = -1, voffset = -1;
 	int ret;
 
 	if (argc > 1) {
 		ret = sscanf(argv[1], "%lu", &count);
 		if (ret != 1) {
-			fprintf(stderr, "%s: failed to fscanf(%s): %s\n",
+			fprintf(stderr, "%s: failed to fscanf(%s) to "
+				"frame count: %s\n",
 				__func__, argv[1], strerror(errno));
 			return -1;
 		}
 
 		if (count < 0)
 			count = 1000;
+	}
+
+	if (argc > 2) {
+		ret = sscanf(argv[2], "%i", &hoffset);
+		if (ret != 1)
+			fprintf(stderr, "%s: failed to fscanf(%s) to "
+				"h offset: %s\n",
+				__func__, argv[2], strerror(errno));
+	}
+
+	if (argc > 3) {
+		ret = sscanf(argv[3], "%i", &voffset);
+		if (ret != 1)
+			fprintf(stderr, "%s: failed to fscanf(%s) to "
+				"v offset: %s\n",
+				__func__, argv[3], strerror(errno));
 	}
 
 	printf("Running for %lu frames.\n", count);
@@ -59,7 +77,7 @@ int main(int argc, char *argv[])
 	if (ret)
 		return ret;
 
-	ret = capture_init(count);
+	ret = capture_init(count, hoffset, voffset);
 	if (ret)
 		return ret;
 
