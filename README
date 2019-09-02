@@ -1,0 +1,38 @@
+This repository contains the still evolving tool for the FOSDEM VIDEO hardware.
+
+Current working setup:
+----------------------
+
+The TFP401 is pretty finicky about what modes it does accept correctly. We
+need to provide some small hacks to have our test/validation setup work
+correctly.
+
+These issues should go away when we move to the ADV7611.
+
+Output side:
+------------
+
+On the outputting allwinner device, run:
+
+./test_output <frame_count> 74.5  1280 1390 1430 1652  720 725 730 752  +hsync +vsync
+
+This is an adjusted modeline to make the tfp401 module happy.
+
+Alternatively, run make in Documentation/EDID/ in the kernel tree, and copy
+the 1280x720_tfp401.bin to /lib/firmware/edid/, and add the following to
+u-boot commandline:
+ drm.edid_firmware=edid/1280x720_tfp401.bin
+
+That will automatically make the hdmi block select the right timing upon boot.
+
+Capture side:
+-------------
+
+On the capture device, run:
+
+./juggler <frame_count> 216 22
+
+This will set up the delays after h/vsync to make the tfp401 module provide a
+correct image.
+
+These settings have now been added as defaults in the CSI1 driver.
