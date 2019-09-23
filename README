@@ -25,6 +25,9 @@ u-boot commandline:
 
 That will automatically make the hdmi block select the right timing upon boot.
 
+Another option is to write the edid rom to the TFP401 module, as described in
+'readme.tfp401'.
+
 Capture side:
 -------------
 
