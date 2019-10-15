@@ -18,6 +18,14 @@
 #ifndef _HAVE_KMS_H_
 #define _HAVE_KMS_H_ 1
 
+#if defined(DRM_FOURCC_H) && !defined(DRM_FORMAT_R8_G8_B8)
+/*
+ * This definition might be out of sync with drm though.
+ */
+#warning "DRM_FORMAT_R8_G8_B8 undefined. Working around it."
+#define DRM_FORMAT_R8_G8_B8 fourcc_code('P', 'R', 'G', 'B')
+#endif
+
 struct capture_buffer;
 struct _drmModeAtomicReq;
 struct _drmModeModeInfo;
