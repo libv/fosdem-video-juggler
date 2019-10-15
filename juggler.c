@@ -21,12 +21,27 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <sysexits.h>
 
 #include "juggler.h"
 #include "capture.h"
 #include "kms.h"
 #include "status.h"
 #include "projector.h"
+
+void
+usage(const char *name)
+{
+	printf("%s: the central FOSDEM video capture hardware tool.\n", name);
+	printf("\n");
+	printf("usage: %s [-t] [frames] [hoffset] [voffset]\n", name);
+	printf("  -t\t\tTest frames for position markers to validate "
+	       "integrity.\n");
+	printf("  frames\tThe number of frames to capture and display.\n");
+	printf("  hoffset\tCSI capture starts hoffset pixels after HSync.\n");
+	printf("  voffset\tCSI capture starts voffset lines after VSync.\n");
+	printf("\n");
+}
 
 int main(int argc, char *argv[])
 {
@@ -40,7 +55,8 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "%s: failed to fscanf(%s) to "
 				"frame count: %s\n",
 				__func__, argv[1], strerror(errno));
-			return -1;
+			usage(argv[0]);
+			return EX_USAGE;
 		}
 
 		if (count < 0)
@@ -49,18 +65,24 @@ int main(int argc, char *argv[])
 
 	if (argc > 2) {
 		ret = sscanf(argv[2], "%i", &hoffset);
-		if (ret != 1)
+		if (ret != 1) {
 			fprintf(stderr, "%s: failed to fscanf(%s) to "
 				"h offset: %s\n",
 				__func__, argv[2], strerror(errno));
+			usage(argv[0]);
+			return EX_USAGE;
+		}
 	}
 
 	if (argc > 3) {
 		ret = sscanf(argv[3], "%i", &voffset);
-		if (ret != 1)
+		if (ret != 1) {
 			fprintf(stderr, "%s: failed to fscanf(%s) to "
 				"v offset: %s\n",
 				__func__, argv[3], strerror(errno));
+			usage(argv[0]);
+			return EX_USAGE;
+		}
 	}
 
 	printf("Running for %lu frames.\n", count);
