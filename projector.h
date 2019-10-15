@@ -22,6 +22,6 @@ struct capture_buffer;
 
 void kms_projector_capture_display(struct capture_buffer *buffer);
 
-int kms_projector_init(unsigned long count);
+int kms_projector_init(void);
 
 #endif /* _HAVE_PROJECTOR_H_ */

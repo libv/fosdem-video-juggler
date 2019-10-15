@@ -40,7 +40,6 @@
 #include "projector.h"
 #include "capture.h"
 
-static unsigned long kms_projector_frame_count;
 static pthread_t kms_projector_thread[1];
 
 struct kms_projector {
@@ -287,7 +286,7 @@ kms_projector_thread_handler(void *arg)
 	struct kms_projector *projector = (struct kms_projector *) arg;
 	int ret, i;
 
-	for (i = 0; i < kms_projector_frame_count; i++) {
+	for (i = 0; true; i++) {
 		struct capture_buffer *new, *old;
 
 		pthread_mutex_lock(projector->capture_buffer_mutex);
@@ -339,12 +338,10 @@ kms_projector_capture_display(struct capture_buffer *buffer)
 }
 
 int
-kms_projector_init(unsigned long count)
+kms_projector_init(void)
 {
 	struct kms_projector *projector;
 	int ret;
-
-	kms_projector_frame_count = count;
 
 	projector = calloc(1, sizeof(struct kms_projector));
 	if (!projector)

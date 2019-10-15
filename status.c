@@ -33,7 +33,6 @@
 #include "status.h"
 #include "capture.h"
 
-static unsigned long kms_status_frame_count;
 static pthread_t kms_status_thread[1];
 
 struct kms_status {
@@ -433,7 +432,7 @@ kms_status_thread_handler(void *arg)
 	struct kms_status *status = (struct kms_status *) arg;
 	int ret, i;
 
-	for (i = 0; i < kms_status_frame_count; i++) {
+	for (i = 0; true; i++) {
 		struct capture_buffer *new, *old;
 
 		pthread_mutex_lock(status->capture_buffer_mutex);
@@ -486,12 +485,10 @@ kms_status_capture_display(struct capture_buffer *buffer)
 }
 
 int
-kms_status_init(unsigned long count)
+kms_status_init(void)
 {
 	struct kms_status *status;
 	int ret;
-
-	kms_status_frame_count = count;
 
 	status = calloc(1, sizeof(struct kms_status));
 	if (!status)

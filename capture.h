@@ -46,6 +46,6 @@ struct capture_buffer {
 
 int capture_buffer_display_release(struct capture_buffer *buffer);
 
-int capture_init(unsigned long count, int hoffset, int voffset);
+int capture_init(bool test, int hoffset, int voffset);
 
 #endif /* _HAVE_CAPTURE_H_ */

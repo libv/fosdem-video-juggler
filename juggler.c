@@ -29,77 +29,86 @@
 #include "status.h"
 #include "projector.h"
 
+static bool capture_test = false;
+static int capture_hoffset = -1;
+static int capture_voffset = -1;
+
 void
 usage(const char *name)
 {
 	printf("%s: the central FOSDEM video capture hardware tool.\n", name);
-	printf("\n");
-	printf("usage: %s [-t] [frames] [hoffset] [voffset]\n", name);
+	printf("usage: %s [-t] [hoffset] [voffset]\n", name);
 	printf("  -t\t\tTest frames for position markers to validate "
 	       "integrity.\n");
-	printf("  frames\tThe number of frames to capture and display.\n");
 	printf("  hoffset\tCSI capture starts hoffset pixels after HSync.\n");
 	printf("  voffset\tCSI capture starts voffset lines after VSync.\n");
 	printf("\n");
 }
 
-int main(int argc, char *argv[])
+int
+args_parse(int argc, char *argv[])
 {
-	unsigned long count = 1000;
-	unsigned int hoffset = -1, voffset = -1;
+	int i = 1; /* skip program name */
 	int ret;
 
-	if (argc > 1) {
-		ret = sscanf(argv[1], "%lu", &count);
-		if (ret != 1) {
-			fprintf(stderr, "%s: failed to fscanf(%s) to "
-				"frame count: %s\n",
-				__func__, argv[1], strerror(errno));
-			usage(argv[0]);
-			return EX_USAGE;
-		}
+	if (i == argc) /* no args */
+		return 0;
 
-		if (count < 0)
-			count = 1000;
+	if (!strcmp(argv[i], "-t")) {
+		capture_test = true;
+		i++;
+		if (i == argc)
+			return 0;
 	}
 
-	if (argc > 2) {
-		ret = sscanf(argv[2], "%i", &hoffset);
-		if (ret != 1) {
-			fprintf(stderr, "%s: failed to fscanf(%s) to "
-				"h offset: %s\n",
-				__func__, argv[2], strerror(errno));
-			usage(argv[0]);
-			return EX_USAGE;
-		}
+	ret = sscanf(argv[i], "%i", &capture_hoffset);
+	if (ret != 1) {
+		fprintf(stderr, "\n%s: failed to sscanf(%s) to capture "
+			"hoffset.\n\n", __func__, argv[i]);
+		goto error;
 	}
+	i++;
+	if (i == argc)
+		return 0;
 
-	if (argc > 3) {
-		ret = sscanf(argv[3], "%i", &voffset);
-		if (ret != 1) {
-			fprintf(stderr, "%s: failed to fscanf(%s) to "
-				"v offset: %s\n",
-				__func__, argv[3], strerror(errno));
-			usage(argv[0]);
-			return EX_USAGE;
-		}
+	ret = sscanf(argv[i], "%i", &capture_voffset);
+	if (ret != 1) {
+		fprintf(stderr, "\n%s: failed to sscanf(%s) to capture "
+			"voffset.\n\n", __func__, argv[i]);
+		goto error;
 	}
+	i++;
+	if (i == argc)
+		return 0;
 
-	printf("Running for %lu frames.\n", count);
+	fprintf(stderr, "\n%s: too many arguments: \"%s\" is not "
+		"handled\n\n", __func__, argv[i]);
+ error:
+	usage(argv[0]);
+	return EX_USAGE;
+}
+
+int main(int argc, char *argv[])
+{
+	int ret;
+
+	ret = args_parse(argc, argv);
+	if (ret)
+		return ret;
 
 	ret = kms_init();
 	if (ret)
 		return ret;
 
-	ret = kms_status_init(count);
+	ret = kms_status_init();
 	if (ret)
 		return ret;
 
-	ret = kms_projector_init(count);
+	ret = kms_projector_init();
 	if (ret)
 		return ret;
 
-	ret = capture_init(count, hoffset, voffset);
+	ret = capture_init(capture_test, capture_hoffset, capture_voffset);
 	if (ret)
 		return ret;
 

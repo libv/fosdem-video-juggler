@@ -42,25 +42,24 @@
 #include "projector.h"
 #include "juggler.h"
 
-int capture_fd = -1;
+static int capture_fd = -1;
 
-char *v4l2_device_card_name = "sun4i_csi1";
+static int capture_width;
+static int capture_height;
+static size_t capture_pitch;
+static size_t capture_plane_size;
+static uint32_t capture_fourcc;
 
-enum v4l2_buf_type capture_type = -1;
-int capture_width;
-int capture_height;
-size_t capture_pitch;
-size_t capture_plane_size;
-uint32_t capture_fourcc;
-int capture_hoffset = -1;
-int capture_voffset = -1;
+static bool capture_test = false;
+static int capture_hoffset = -1;
+static int capture_voffset = -1;
 
-int capture_frame_offset = -1;
+static int capture_frame_offset = -1;
 
-int capture_buffer_count;
-struct capture_buffer *capture_buffers;
+static int capture_buffer_count;
+static struct capture_buffer *capture_buffers;
 
-pthread_t capture_thread[1];
+static pthread_t capture_thread[1];
 
 static int
 v4l2_device_find(void)
@@ -661,7 +660,8 @@ capture_buffer_display(struct capture_buffer *buffer, int frame)
 	kms_projector_capture_display(buffer);
 	kms_status_capture_display(buffer);
 
-	capture_buffer_test(buffer, frame);
+	if (capture_test)
+		capture_buffer_test(buffer, frame);
 	capture_buffer_display_release(buffer);
 
 	return 0;
@@ -670,7 +670,6 @@ capture_buffer_display(struct capture_buffer *buffer, int frame)
 static void *
 capture_thread_handler(void *arg)
 {
-	unsigned long count = (unsigned long) arg;
 	int ret, i;
 
 	capture_fd = v4l2_device_find();
@@ -710,7 +709,7 @@ capture_thread_handler(void *arg)
 	if (ret)
 		return NULL;
 
-	for (i = 0; i < count; i++) {
+	for (i = 0; true; i++) {
 		struct capture_buffer *buffer;
 		int index = v4l2_buffer_dequeue();
 
@@ -730,15 +729,22 @@ capture_thread_handler(void *arg)
 }
 
 int
-capture_init(unsigned long count, int hoffset, int voffset)
+capture_init(bool test, int hoffset, int voffset)
 {
 	int ret;
 
+	capture_test = test;
+	if (capture_test)
+		printf("Capture: verifying integrity of picture.\n");
+
 	capture_hoffset = hoffset;
 	capture_voffset = voffset;
+	if ((capture_hoffset != -1) || (capture_voffset != -1))
+		printf("Capture: using CSI engine offset %d,%d\n",
+		       capture_hoffset, capture_voffset);
 
 	ret = pthread_create(capture_thread, NULL, capture_thread_handler,
-			     (void *) count);
+			     NULL);
 	if (ret)
 		fprintf(stderr, "%s() failed: %s\n", __func__, strerror(ret));
 

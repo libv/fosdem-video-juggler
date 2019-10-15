@@ -22,6 +22,6 @@ struct capture_buffer;
 
 void kms_status_capture_display(struct capture_buffer *buffer);
 
-int kms_status_init(unsigned long count);
+int kms_status_init(void);
 
 #endif /* _HAVE_STATUS_H_ */
