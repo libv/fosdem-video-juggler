@@ -77,6 +77,12 @@ struct kms_status {
 	 * This is the upcoming buffer that was last queued by capture.
 	 */
 	struct capture_buffer *capture_buffer_new;
+
+	/*
+	 * Count the number of frames not updated, so we can implement
+	 * a poor mans "No signal".
+	 */
+	uint32_t capture_stall_count;
 };
 static struct kms_status *kms_status;
 
@@ -442,18 +448,32 @@ kms_status_thread_handler(void *arg)
 
 		pthread_mutex_unlock(status->capture_buffer_mutex);
 
-		ret = kms_status_frame_update(status, new, i);
-		if (ret)
-			return NULL;
+		if (new) {
+			ret = kms_status_frame_update(status, new, i);
+			if (ret)
+				return NULL;
 
-		old = status->capture_buffer_current;
-		status->capture_buffer_current = new;
+			old = status->capture_buffer_current;
+			status->capture_buffer_current = new;
 
-		if (old)
-			capture_buffer_display_release(old);
+			if (old)
+				capture_buffer_display_release(old);
 
-		if (!new)
+			if (status->capture_stall_count) {
+				if (status->capture_stall_count > 2)
+					printf("Status: Capture stalled for"
+					       " %d frames.\n",
+					       status->capture_stall_count);
+				status->capture_stall_count = 0;
+			}
+		} else {
+			status->capture_stall_count++;
+			if (status->capture_stall_count == 5) {
+				printf("Status: No input!\n");
+			}
+
 			usleep(16667);
+		}
 	}
 
 	printf("%s: done!\n", __func__);
