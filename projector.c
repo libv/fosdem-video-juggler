@@ -84,6 +84,9 @@ struct kms_projector {
 	 * a poor mans "No signal".
 	 */
 	uint32_t capture_stall_count;
+	bool capture_stalled;
+
+	struct kms_buffer *capture_stalled_buffer;
 };
 static struct kms_projector *kms_projector;
 
@@ -258,6 +261,55 @@ kms_projector_capture_set(struct kms_projector *projector,
 				 buffer->kms_fb_id);
 }
 
+/*
+ * Show input buffer on projector, scaled, with borders.
+ */
+static void
+kms_projector_stalled_set(struct kms_projector *projector,
+			  drmModeAtomicReqPtr request)
+{
+	struct kms_plane *plane = projector->capture_scaling;
+	struct kms_buffer *buffer = projector->capture_stalled_buffer;
+
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_id,
+				 projector->crtc_id);
+
+	/* Full crtc size */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_x, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_y, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_w,
+				 buffer->width);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_h,
+				 buffer->height);
+
+	/* read in full size image */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_x, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_y, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_w,
+				 buffer->width << 16);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_h,
+				 buffer->height << 16);
+
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_zpos, 0);
+
+	plane->active = false;
+
+	/* actual flip. */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_fb_id,
+				 buffer->fb_id);
+}
+
 static int
 kms_projector_frame_update(struct kms_projector *projector,
 			   struct capture_buffer *buffer, int frame)
@@ -267,7 +319,10 @@ kms_projector_frame_update(struct kms_projector *projector,
 
 	request = drmModeAtomicAlloc();
 
-	kms_projector_capture_set(projector, buffer, request);
+	if (projector->capture_stalled)
+		kms_projector_stalled_set(projector, request);
+	else
+		kms_projector_capture_set(projector, buffer, request);
 
 	if (projector->plane_disable && projector->plane_disable->active)
 		kms_plane_disable(projector->plane_disable, request);
@@ -293,7 +348,7 @@ kms_projector_thread_handler(void *arg)
 	int ret, i;
 
 	for (i = 0; true; i++) {
-		struct capture_buffer *new, *old;
+		struct capture_buffer *new, *old = NULL;
 
 		pthread_mutex_lock(projector->capture_buffer_mutex);
 
@@ -303,30 +358,42 @@ kms_projector_thread_handler(void *arg)
 		pthread_mutex_unlock(projector->capture_buffer_mutex);
 
 		if (new) {
-			ret = kms_projector_frame_update(projector, new, i);
-			if (ret)
-				return NULL;
-
-			old = projector->capture_buffer_current;
-			projector->capture_buffer_current = new;
-
-			if (old)
-				capture_buffer_display_release(old);
-
 			if (projector->capture_stall_count) {
 				if (projector->capture_stall_count > 2)
 					printf("Projector: Capture stalled for"
 					       " %d frames.\n",
 					       projector->capture_stall_count);
 				projector->capture_stall_count = 0;
+				projector->capture_stalled = false;
 			}
+
+			ret = kms_projector_frame_update(projector, new, i);
+			if (ret)
+				return NULL;
+
+			old = projector->capture_buffer_current;
+			projector->capture_buffer_current = new;
 		} else {
 			projector->capture_stall_count++;
 			if (projector->capture_stall_count == 5) {
 				printf("Projector: No input!\n");
+				projector->capture_stalled = true;
+
+				ret = kms_projector_frame_update(projector,
+								 NULL, i);
+				if (ret)
+					return NULL;
+
+				old = projector->capture_buffer_current;
+				projector->capture_buffer_current = NULL;
 			}
-			usleep(16667);
 		}
+
+		if (old)
+			capture_buffer_display_release(old);
+
+		if (!new)
+			usleep(16667);
 	}
 
 	printf("%s: done!\n", __func__);
@@ -398,6 +465,11 @@ kms_projector_init(void)
 	ret = kms_projector_planes_get(projector);
 	if (ret)
 		return ret;
+
+	projector->capture_stalled_buffer =
+		kms_png_read("PM5644_test_card_FOSDEM.1280x720.png");
+	if (!projector->capture_stalled_buffer)
+		return -1;
 
 	ret = pthread_create(kms_projector_thread, NULL,
 			     kms_projector_thread_handler,
