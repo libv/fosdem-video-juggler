@@ -296,6 +296,9 @@ kms_projector_thread_handler(void *arg)
 
 		pthread_mutex_unlock(projector->capture_buffer_mutex);
 
+		if (!new)
+			fprintf(stderr, "frame i: not updated!\n");
+
 		ret = kms_projector_frame_update(projector, new, i);
 		if (ret)
 			return NULL;
@@ -372,6 +375,9 @@ kms_projector_init(void)
 		return ret;
 
 	projector->crtc_index = ret;
+
+	printf("Projector is CRTC %d, %4dx%4d\n", projector->crtc_index,
+	       projector->crtc_width, projector->crtc_height);
 
 	ret = kms_projector_planes_get(projector);
 	if (ret)
