@@ -295,6 +295,22 @@ kms_status_capture_set(struct kms_status *status,
 }
 
 /*
+ * Show input buffer on the status lcd, in the top right corner.
+ */
+static void
+kms_status_capture_disable(struct kms_status *status,
+			   drmModeAtomicReqPtr request)
+{
+	struct kms_plane *plane = status->capture_scaling;
+
+	if (plane->active) {
+		drmModeAtomicAddProperty(request, plane->plane_id,
+					 plane->property_fb_id, 0);
+		plane->active = false;
+	}
+}
+
+/*
  * Show status text on bottom of the status lcd.
  */
 static void
@@ -432,6 +448,35 @@ kms_status_frame_update(struct kms_status *status,
 	return ret;
 }
 
+static int
+kms_status_frame_noinput(struct kms_status *status, int frame)
+{
+	drmModeAtomicReqPtr request;
+	int ret;
+
+	request = drmModeAtomicAlloc();
+
+	kms_plane_disable(status->capture_scaling, request);
+	kms_status_text_set(status, request);
+	kms_status_logo_set(status, request);
+
+	if (status->plane_disable && status->plane_disable->active)
+		kms_plane_disable(status->plane_disable, request);
+
+	ret = drmModeAtomicCommit(kms_fd, request,
+				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+
+	drmModeAtomicFree(request);
+
+	if (ret) {
+		fprintf(stderr, "%s: failed to show frame %d: %s\n",
+			__func__, frame, strerror(errno));
+		ret = -errno;
+	}
+
+	return ret;
+}
+
 static void *
 kms_status_thread_handler(void *arg)
 {
@@ -470,6 +515,16 @@ kms_status_thread_handler(void *arg)
 			status->capture_stall_count++;
 			if (status->capture_stall_count == 5) {
 				printf("Status: No input!\n");
+
+				ret = kms_status_frame_noinput(status, i);
+				if (ret)
+					return NULL;
+
+				old = status->capture_buffer_current;
+				status->capture_buffer_current = NULL;
+
+				if (old)
+					capture_buffer_display_release(old);
 			}
 
 			usleep(16667);
