@@ -78,6 +78,12 @@ struct kms_projector {
 	 * This is the upcoming buffer that was last queued by capture.
 	 */
 	struct capture_buffer *capture_buffer_new;
+
+	/*
+	 * Count the number of frames not updated, so we can implement
+	 * a poor mans "No signal".
+	 */
+	uint32_t capture_stall_count;
 };
 static struct kms_projector *kms_projector;
 
@@ -296,21 +302,31 @@ kms_projector_thread_handler(void *arg)
 
 		pthread_mutex_unlock(projector->capture_buffer_mutex);
 
-		if (!new)
-			fprintf(stderr, "frame i: not updated!\n");
+		if (new) {
+			ret = kms_projector_frame_update(projector, new, i);
+			if (ret)
+				return NULL;
 
-		ret = kms_projector_frame_update(projector, new, i);
-		if (ret)
-			return NULL;
+			old = projector->capture_buffer_current;
+			projector->capture_buffer_current = new;
 
-		old = projector->capture_buffer_current;
-		projector->capture_buffer_current = new;
+			if (old)
+				capture_buffer_display_release(old);
 
-		if (old)
-			capture_buffer_display_release(old);
-
-		if (!new)
+			if (projector->capture_stall_count) {
+				if (projector->capture_stall_count > 2)
+					printf("Projector: Capture stalled for"
+					       " %d frames.\n",
+					       projector->capture_stall_count);
+				projector->capture_stall_count = 0;
+			}
+		} else {
+			projector->capture_stall_count++;
+			if (projector->capture_stall_count == 5) {
+				printf("Projector: No input!\n");
+			}
 			usleep(16667);
+		}
 	}
 
 	printf("%s: done!\n", __func__);
