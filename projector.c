@@ -196,8 +196,18 @@ kms_projector_capture_set(struct kms_projector *projector,
 			  drmModeAtomicReqPtr request)
 {
 	struct kms_plane *plane = projector->capture_scaling;
+	int width, height;
+	uint32_t fb_id;
 
-	if (!buffer)
+	if (projector->capture_stalled) {
+		width = projector->capture_stalled_buffer->width;
+		height = projector->capture_stalled_buffer->height;
+		fb_id = projector->capture_stalled_buffer->fb_id;
+	} else if (buffer) {
+		width = buffer->width;
+		height = buffer->height;
+		fb_id = buffer->kms_fb_id;
+	} else
 		return;
 
 	if (!plane->active) {
@@ -208,8 +218,8 @@ kms_projector_capture_set(struct kms_projector *projector,
 					 projector->crtc_id);
 
 		/* Scale, with borders, and center */
-		if ((buffer->width == projector->crtc_width) &&
-		    (buffer->height == projector->crtc_height)) {
+		if ((width == projector->crtc_width) &&
+		    (height == projector->crtc_height)) {
 			x = 0;
 			y = 0;
 			w = projector->crtc_width;
@@ -217,14 +227,14 @@ kms_projector_capture_set(struct kms_projector *projector,
 		} else {
 			/* first, try to fit horizontally. */
 			w = projector->crtc_width;
-			h = buffer->height * projector->crtc_width /
-				buffer->width;
+			h = height * projector->crtc_width /
+				width;
 
 			/* if height does not fit, inverse the logic */
 			if (h > projector->crtc_height) {
 				h = projector->crtc_height;
-				w = buffer->width * projector->crtc_height /
-					buffer->height;
+				w = width * projector->crtc_height /
+					height;
 			}
 
 			/* center */
@@ -248,66 +258,16 @@ kms_projector_capture_set(struct kms_projector *projector,
 					 plane->property_src_y, 0);
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_src_w,
-					 buffer->width << 16);
+					 width << 16);
 		drmModeAtomicAddProperty(request, plane->plane_id,
 					 plane->property_src_h,
-					 buffer->height << 16);
+					 height << 16);
 		plane->active = true;
 	}
 
 	/* actual flip. */
 	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_fb_id,
-				 buffer->kms_fb_id);
-}
-
-/*
- * Show input buffer on projector, scaled, with borders.
- */
-static void
-kms_projector_stalled_set(struct kms_projector *projector,
-			  drmModeAtomicReqPtr request)
-{
-	struct kms_plane *plane = projector->capture_scaling;
-	struct kms_buffer *buffer = projector->capture_stalled_buffer;
-
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_crtc_id,
-				 projector->crtc_id);
-
-	/* Full crtc size */
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_crtc_x, 0);
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_crtc_y, 0);
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_crtc_w,
-				 buffer->width);
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_crtc_h,
-				 buffer->height);
-
-	/* read in full size image */
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_src_x, 0);
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_src_y, 0);
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_src_w,
-				 buffer->width << 16);
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_src_h,
-				 buffer->height << 16);
-
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_zpos, 0);
-
-	plane->active = false;
-
-	/* actual flip. */
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_fb_id,
-				 buffer->fb_id);
+				 plane->property_fb_id, fb_id);
 }
 
 static int
@@ -319,10 +279,7 @@ kms_projector_frame_update(struct kms_projector *projector,
 
 	request = drmModeAtomicAlloc();
 
-	if (projector->capture_stalled)
-		kms_projector_stalled_set(projector, request);
-	else
-		kms_projector_capture_set(projector, buffer, request);
+	kms_projector_capture_set(projector, buffer, request);
 
 	if (projector->plane_disable && projector->plane_disable->active)
 		kms_plane_disable(projector->plane_disable, request);
