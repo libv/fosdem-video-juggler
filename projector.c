@@ -424,7 +424,7 @@ kms_projector_init(void)
 		return ret;
 
 	projector->capture_stalled_buffer =
-		kms_png_read("PM5644_test_card_FOSDEM.1280x720.png");
+		kms_png_read("capture_stalled.png");
 	if (!projector->capture_stalled_buffer)
 		return -1;
 
