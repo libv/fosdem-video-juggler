@@ -89,6 +89,7 @@ void kms_plane_disable(struct kms_plane *kms_plane,
 
 struct kms_buffer *kms_buffer_get(int width, int height, uint32_t format);
 struct kms_buffer *kms_png_read(const char *filename);
+struct capture_buffer *kms_png_r8g8b8_read(const char *filename);
 
 int kms_buffer_import(struct capture_buffer *buffer);
 

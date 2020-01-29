@@ -881,6 +881,80 @@ kms_buffer_get(int width, int height, uint32_t format)
 	return buffer;
 }
 
+struct capture_buffer *
+kms_buffer_r8g8b8_get(int width, int height)
+{
+	struct capture_buffer *buffer;
+	uint32_t handles[4] = { 0 };
+	uint32_t pitches[4] = { 0 };
+	uint32_t offsets[4] = { 0 };
+	int ret, i;
+
+	buffer = calloc(1, sizeof(struct capture_buffer));
+	buffer->index = -1;
+	buffer->width = width;
+	buffer->height = height;
+	buffer->drm_format = DRM_FORMAT_R8_G8_B8;
+
+	for (i = 0; i < 3; i++) {
+		struct drm_mode_create_dumb buffer_create = { 0 };
+		struct drm_mode_map_dumb buffer_map = { 0 };
+
+		buffer_create.width = width;
+		buffer_create.height = height;
+		buffer_create.bpp = 8;
+		ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_CREATE_DUMB,
+			       &buffer_create);
+		if (ret) {
+			fprintf(stderr, "%s: failed to create buffer: %s\n",
+				__func__, strerror(errno));
+			return NULL;
+		}
+
+		buffer->planes[i].prime_handle = buffer_create.handle;
+		handles[i] = buffer_create.handle;
+
+		buffer->plane_size = buffer_create.size;
+
+		buffer->pitch = buffer_create.pitch;
+		pitches[i] = buffer_create.pitch;
+
+		buffer_map.handle = buffer_create.handle;
+		ret = drmIoctl(kms_fd, DRM_IOCTL_MODE_MAP_DUMB, &buffer_map);
+		if (ret) {
+			fprintf(stderr, "%s: failed to map buffer: %s\n",
+				__func__, strerror(errno));
+			return NULL;
+		}
+
+		buffer->planes[i].offset = buffer_map.offset;
+
+		buffer->planes[i].map =
+			mmap(0, buffer->plane_size, PROT_READ | PROT_WRITE,
+			     MAP_SHARED, kms_fd, buffer_map.offset);
+		if (buffer->planes[i].map == MAP_FAILED) {
+			fprintf(stderr, "%s: failed to mmap buffer: %s\n",
+				__func__, strerror(errno));
+			return NULL;
+		}
+	}
+
+	ret = drmModeAddFB2(kms_fd, buffer->width, buffer->height,
+			    buffer->drm_format, handles, pitches, offsets,
+			    &buffer->kms_fb_id, 0);
+	if (ret) {
+		fprintf(stderr, "%s: failed to create fb: %s\n",
+			__func__, strerror(errno));
+		return NULL;
+	}
+
+	printf("%s(): Created FB 0x%02X (%dx%d, 3x%tdbytes).\n", __func__,
+	       buffer->kms_fb_id, buffer->width, buffer->height,
+	       buffer->plane_size);
+
+	return buffer;
+}
+
 /*
  *
  */
@@ -973,6 +1047,74 @@ kms_png_read(const char *filename)
 	}
 
 	png_image_free(image);
+	return buffer;
+}
+
+/*
+ *
+ */
+struct capture_buffer *
+kms_png_r8g8b8_read(const char *filename)
+{
+	struct capture_buffer *buffer;
+	uint8_t *red, *green, *blue;
+	uint32_t *interleaved;
+	png_image image[1] = {{
+		.version = PNG_IMAGE_VERSION,
+	}};
+	int ret, i;
+
+	ret = png_image_begin_read_from_file(image, filename);
+	if (ret != 1) {
+		fprintf(stderr, "%s(): read_from_file() failed: %s\n",
+			__func__, image->message);
+		return NULL;
+	}
+
+	image->format = PNG_FORMAT_BGRA;
+
+	printf("Reading from %s: %dx%d (%dbytes)\n", filename,
+	       image->width, image->height, PNG_IMAGE_SIZE(*image));
+
+	interleaved = calloc(image->width * image->height * 4, 1);
+	if (!interleaved) {
+		fprintf(stderr, "%s(): failed to create intermediate "
+			"buffer for %s\n", __func__, filename);
+		png_image_free(image);
+		return NULL;
+	}
+
+	ret = png_image_finish_read(image, NULL, interleaved, 0, NULL);
+	if (ret != 1) {
+		fprintf(stderr, "%s(): failed to read png for %s: %s\n",
+			__func__, filename, image->message);
+		/* we need to cleanly destroy buffers. */
+		free(interleaved);
+		png_image_free(image);
+		return NULL;
+	}
+
+	png_image_free(image);
+
+	buffer = kms_buffer_r8g8b8_get(image->width, image->height);
+	if (!buffer) {
+		fprintf(stderr, "%s(): failed to create buffer for %s\n",
+			__func__, filename);
+		png_image_free(image);
+		return NULL;
+	}
+
+	/* we have swapped blue and red channels on our system */
+	blue = buffer->planes[0].map;
+	green = buffer->planes[1].map;
+	red = buffer->planes[2].map;
+
+	for (i = 0; i < buffer->plane_size; i++) {
+		red[i] = (interleaved[i] >> 0) & 0xFF;
+		green[i] = (interleaved[i] >> 8) & 0xFF;
+		blue[i] = (interleaved[i] >> 16) & 0xFF;
+	}
+
 	return buffer;
 }
 
