@@ -232,9 +232,6 @@ kms_output_background_set(struct kms_output *output,
 				 plane->property_src_h,
 				 buffer->height << 16);
 
-	drmModeAtomicAddProperty(request, plane->plane_id,
-				 plane->property_zpos, 0);
-
 	plane->active = true;
 
 	/* actual flip. */
