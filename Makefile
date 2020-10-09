@@ -22,7 +22,7 @@ juggler: $(juggler_objects)
 
 test_output_objects = \
 	kms.o \
-	output.o
+	test.o
 
 test_output: $(test_output_objects)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
