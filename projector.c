@@ -86,7 +86,7 @@ struct kms_projector {
 	uint32_t capture_stall_count;
 	bool capture_stalled;
 
-	struct capture_buffer *capture_stalled_buffer;
+	struct kms_buffer *capture_stalled_buffer;
 };
 static struct kms_projector *kms_projector;
 
@@ -202,7 +202,7 @@ kms_projector_capture_set(struct kms_projector *projector,
 	if (projector->capture_stalled) {
 		width = projector->capture_stalled_buffer->width;
 		height = projector->capture_stalled_buffer->height;
-		fb_id = projector->capture_stalled_buffer->kms_fb_id;
+		fb_id = projector->capture_stalled_buffer->fb_id;
 		plane->active = false;
 	} else if (buffer) {
 		width = buffer->width;
@@ -424,8 +424,7 @@ kms_projector_init(void)
 	if (ret)
 		return ret;
 
-	projector->capture_stalled_buffer =
-		kms_png_r8g8b8_read("capture_stalled.png");
+	projector->capture_stalled_buffer = kms_png_read("capture_stalled.png");
 	if (!projector->capture_stalled_buffer)
 		return -1;
 
