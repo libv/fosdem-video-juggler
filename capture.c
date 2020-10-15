@@ -713,8 +713,11 @@ capture_thread_handler(void *arg)
 		struct capture_buffer *buffer;
 		int index = v4l2_buffer_dequeue();
 
-		if (index < 0)
+		if (index < 0) {
+			fprintf(stderr, "%s(): stream stopped: %d\n",
+				__func__, index);
 			return NULL;
+		}
 
 		/* frame 0 starts at a random line anyway, so skip it */
 		if (i) {
