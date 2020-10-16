@@ -22,6 +22,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <sysexits.h>
+#include <sys/time.h>
 
 #include "juggler.h"
 #include "capture.h"

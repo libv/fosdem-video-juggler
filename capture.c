@@ -476,7 +476,7 @@ v4l2_streaming_start(void)
 	return 0;
 }
 
-static int
+static struct capture_buffer *
 v4l2_buffer_dequeue(void)
 {
 	struct v4l2_plane planes[3] = {{ 0 }};
@@ -486,16 +486,27 @@ v4l2_buffer_dequeue(void)
 			.m.planes = planes,
 			.length = 3,
 		}};
+	struct capture_buffer *buffer = NULL;
 	int ret;
 
 	ret = ioctl(capture_fd, VIDIOC_DQBUF, dequeue);
 	if (ret) {
 		fprintf(stderr, "Error: ioctl(VIDIOC_DQBUF) failed: %s\n",
 			strerror(errno));
-		return -ret;
+		return NULL;
 	}
 
-	return dequeue->index;
+	buffer = &capture_buffers[dequeue->index];
+	buffer->sequence = dequeue->sequence;
+	buffer->timestamp = dequeue->timestamp;
+	buffer->bytes_used = dequeue->bytesused;
+
+	if (dequeue->flags & V4L2_BUF_FLAG_LAST)
+		buffer->last = true;
+	else
+		buffer->last = false;
+
+	return buffer;
 }
 
 static void
@@ -546,11 +557,12 @@ capture_buffer_test_empty(int frame,
 }
 
 static  __maybe_unused void
-capture_buffer_test(struct capture_buffer *buffer, int frame)
+capture_buffer_test(struct capture_buffer *buffer)
 {
 	uint8_t *red, *green, *blue;
 	int center_x = (capture_width >> 1);
 	int center_y = (capture_height >> 1);
+	int frame = buffer->sequence;
 
 	/* we have swapped blue and red channels on our system */
 	blue = buffer->planes[0].map;
@@ -641,7 +653,7 @@ capture_buffer_display_release(struct capture_buffer *buffer)
 }
 
 static int
-capture_buffer_display(struct capture_buffer *buffer, int frame)
+capture_buffer_display(struct capture_buffer *buffer)
 {
 	pthread_mutex_lock(buffer->reference_count_mutex);
 
@@ -661,7 +673,7 @@ capture_buffer_display(struct capture_buffer *buffer, int frame)
 	kms_status_capture_display(buffer);
 
 	if (capture_test)
-		capture_buffer_test(buffer, frame);
+		capture_buffer_test(buffer);
 	capture_buffer_display_release(buffer);
 
 	return 0;
@@ -710,20 +722,23 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	for (i = 0; true; i++) {
-		struct capture_buffer *buffer;
-		int index = v4l2_buffer_dequeue();
+		struct capture_buffer *buffer = v4l2_buffer_dequeue();
 
-		if (index < 0) {
-			fprintf(stderr, "%s(): stream stopped: %d\n",
-				__func__, index);
-			return NULL;
+		if (!buffer) {
+			fprintf(stderr, "%s(): stopping thread.\n", __func__);
+			break;
+		}
+
+		if (buffer->last) {
+			printf("%s(): stream ended at %ld.%06ld (%dframes)\n",
+			       __func__, buffer->timestamp.tv_sec,
+			       buffer->timestamp.tv_usec, buffer->sequence);
+			break;
 		}
 
 		/* frame 0 starts at a random line anyway, so skip it */
-		if (i) {
-			buffer = &capture_buffers[index];
-			capture_buffer_display(buffer, i);
-		}
+		if (buffer->sequence)
+			capture_buffer_display(buffer);
 	}
 
 	printf("\nCaptured %d buffers.\n", i);

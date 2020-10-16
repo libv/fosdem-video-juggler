@@ -40,6 +40,11 @@ struct capture_buffer {
 		uint32_t prime_handle;
 	} planes[3];
 
+	uint32_t sequence;
+	struct timeval timestamp;
+	uint32_t bytes_used;
+	bool last;
+
 	pthread_mutex_t reference_count_mutex[1];
 	int reference_count;
 };
