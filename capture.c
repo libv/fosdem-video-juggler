@@ -872,95 +872,100 @@ capture_buffer_display_stop(void)
 static void *
 capture_thread_handler(void *arg)
 {
-	int ret, i;
+	int ret, i, restarts;
 
 	capture_fd = v4l2_device_find();
 	if (capture_fd < 0)
 		return NULL;
 
-	ret = v4l2_format_get();
-	if (ret)
-		return NULL;
+	for (restarts = 0; true; restarts++) {
+		ret = v4l2_format_get();
+		if (ret)
+			return NULL;
 
-	ret = v4l2_hv_offsets_set();
-	if (ret)
-		return NULL;
+		ret = v4l2_hv_offsets_set();
+		if (ret)
+			return NULL;
 
-	ret = v4l2_buffers_alloc(capture_width, capture_height, capture_pitch,
-				 capture_plane_size, capture_fourcc);
-	if (ret)
-		return NULL;
+		ret = v4l2_buffers_alloc(capture_width, capture_height,
+					 capture_pitch,
+					 capture_plane_size, capture_fourcc);
+		if (ret)
+			return NULL;
 
-	ret = v4l2_buffers_mmap();
-	if (ret)
-		return NULL;
+		ret = v4l2_buffers_mmap();
+		if (ret)
+			return NULL;
 
-	ret = v4l2_buffers_export();
-	if (ret)
-		return NULL;
+		ret = v4l2_buffers_export();
+		if (ret)
+			return NULL;
 
-	ret = v4l2_buffers_kms_import();
-	if (ret)
-		return NULL;
+		ret = v4l2_buffers_kms_import();
+		if (ret)
+			return NULL;
 
-	ret = v4l2_buffers_queue();
-	if (ret)
-		return NULL;
+		ret = v4l2_buffers_queue();
+		if (ret)
+			return NULL;
 
-	ret = v4l2_streaming_start();
-	if (ret)
-		return NULL;
+		ret = v4l2_streaming_start();
+		if (ret)
+			return NULL;
 
-	for (i = 0; true; i++) {
-		struct capture_buffer *buffer = NULL;
+		for (i = 0; true; i++) {
+			struct capture_buffer *buffer = NULL;
 
-		ret = v4l2_buffer_dequeue(&buffer);
-		if (ret) {
-			fprintf(stderr, "%s(): stopping thread.\n", __func__);
-			break;
+			ret = v4l2_buffer_dequeue(&buffer);
+			if (ret) {
+				fprintf(stderr, "%s(): stopping thread.\n", __func__);
+				break;
+			}
+
+			if (buffer->last) {
+				printf("%s(): stream ended at %ld.%06ld (%dframes)\n",
+				       __func__, buffer->timestamp.tv_sec,
+				       buffer->timestamp.tv_usec, buffer->sequence);
+				break;
+			}
+
+			/* frame 0 starts at a random line anyway, so skip it */
+			if (buffer->sequence)
+				capture_buffer_display(buffer);
 		}
 
-		if (buffer->last) {
-			printf("%s(): stream ended at %ld.%06ld (%dframes)\n",
-			       __func__, buffer->timestamp.tv_sec,
-			       buffer->timestamp.tv_usec, buffer->sequence);
-			break;
-		}
+		printf("Restart %d: Captured %d buffers.\n", restarts, i);
+		capture_buffer_display_stop();
 
-		/* frame 0 starts at a random line anyway, so skip it */
-		if (buffer->sequence)
-			capture_buffer_display(buffer);
+		/*
+		 * For now, ignore whether we got an error or if the stream ended,
+		 * and try to reinitialize everything.
+		 */
+
+		ret = v4l2_streaming_stop();
+		if (ret)
+			return NULL;
+
+		v4l2_buffers_wait();
+
+		ret = v4l2_buffers_kms_release();
+		if (ret)
+			return NULL;
+
+		ret = v4l2_buffers_munmap();
+		if (ret)
+			return NULL;
+
+		ret = v4l2_buffers_fd_close();
+		if (ret)
+			return NULL;
+
+		ret = v4l2_buffers_release();
+		if (ret)
+			return NULL;
+
+		printf("%s(): restarting!\n", __func__);
 	}
-
-	printf("Captured %d buffers.\n", i);
-	capture_buffer_display_stop();
-
-	/*
-	 * For now, ignore whether we got an error or if the stream ended,
-	 * and try to reinitialize everything.
-	 */
-
-	ret = v4l2_streaming_stop();
-	if (ret)
-		return NULL;
-
-	v4l2_buffers_wait();
-
-	ret = v4l2_buffers_kms_release();
-	if (ret)
-		return NULL;
-
-	ret = v4l2_buffers_munmap();
-	if (ret)
-		return NULL;
-
-	ret = v4l2_buffers_fd_close();
-	if (ret)
-		return NULL;
-
-	ret = v4l2_buffers_release();
-	if (ret)
-		return NULL;
 
 	return NULL;
 }
