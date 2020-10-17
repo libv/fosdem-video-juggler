@@ -87,6 +87,10 @@ struct kms_projector {
 	bool capture_stalled;
 
 	struct kms_buffer *capture_stalled_buffer;
+
+	/* Flag the stream stopping, protect with capture_buffer_mutex */
+	bool capture_stopped;
+	uint32_t capture_stopped_count;
 };
 static struct kms_projector *kms_projector;
 
@@ -198,8 +202,13 @@ kms_projector_capture_set(struct kms_projector *projector,
 	struct kms_plane *plane = projector->capture_scaling;
 	int width, height;
 	uint32_t fb_id;
+	bool stopped = false;
 
-	if (projector->capture_stalled) {
+	pthread_mutex_lock(projector->capture_buffer_mutex);
+	stopped = projector->capture_stopped;
+	pthread_mutex_unlock(projector->capture_buffer_mutex);
+
+	if (stopped || projector->capture_stalled) {
 		width = projector->capture_stalled_buffer->width;
 		height = projector->capture_stalled_buffer->height;
 		fb_id = projector->capture_stalled_buffer->fb_id;
@@ -303,6 +312,7 @@ static void *
 kms_projector_thread_handler(void *arg)
 {
 	struct kms_projector *projector = (struct kms_projector *) arg;
+	bool stopped = false;
 	int ret, i;
 
 	for (i = 0; true; i++) {
@@ -313,9 +323,21 @@ kms_projector_thread_handler(void *arg)
 		new = projector->capture_buffer_new;
 		projector->capture_buffer_new = NULL;
 
+		stopped = projector->capture_stopped;
+
 		pthread_mutex_unlock(projector->capture_buffer_mutex);
 
 		if (new) {
+			ret = kms_projector_frame_update(projector, new, i);
+			if (ret)
+				return NULL;
+
+			old = projector->capture_buffer_current;
+			projector->capture_buffer_current = new;
+
+			if (old)
+				capture_buffer_display_release(old);
+
 			if (projector->capture_stall_count) {
 				if (projector->capture_stall_count > 2)
 					printf("Projector: Capture stalled for"
@@ -324,17 +346,34 @@ kms_projector_thread_handler(void *arg)
 				projector->capture_stall_count = 0;
 				projector->capture_stalled = false;
 			}
+			if (projector->capture_stopped_count) {
+				printf("Projector: Capture stopped for"
+				       " %d frames.\n",
+				       projector->capture_stopped_count);
+				projector->capture_stopped_count = 0;
+			}
+		} else if (stopped) {
+			projector->capture_stopped_count++;
 
-			ret = kms_projector_frame_update(projector, new, i);
-			if (ret)
-				return NULL;
+			if (projector->capture_buffer_current) {
+				printf("Projector: No input! (stopped)\n");
 
-			old = projector->capture_buffer_current;
-			projector->capture_buffer_current = new;
+				ret = kms_projector_frame_update(projector,
+								 NULL, i);
+				if (ret)
+					return NULL;
+
+				old = projector->capture_buffer_current;
+				projector->capture_buffer_current = NULL;
+				capture_buffer_display_release(old);
+			}
+
+			usleep(16667);
 		} else {
 			projector->capture_stall_count++;
+
 			if (projector->capture_stall_count == 5) {
-				printf("Projector: No input!\n");
+				printf("Projector: No input! (stalled)\n");
 				projector->capture_stalled = true;
 
 				ret = kms_projector_frame_update(projector,
@@ -344,19 +383,37 @@ kms_projector_thread_handler(void *arg)
 
 				old = projector->capture_buffer_current;
 				projector->capture_buffer_current = NULL;
+				if (old)
+					capture_buffer_display_release(old);
 			}
-		}
 
-		if (old)
-			capture_buffer_display_release(old);
-
-		if (!new)
 			usleep(16667);
+		}
 	}
 
 	printf("%s: done!\n", __func__);
 
 	return NULL;
+}
+
+void
+kms_projector_capture_stop(void)
+{
+	struct kms_projector *projector = kms_projector;
+	struct capture_buffer *new;
+
+	pthread_mutex_lock(projector->capture_buffer_mutex);
+
+	new = projector->capture_buffer_new;
+	projector->capture_buffer_new = NULL;
+
+	projector->capture_stopped = true;
+
+	pthread_mutex_unlock(projector->capture_buffer_mutex);
+
+	if (new)
+		capture_buffer_display_release(new);
+
 }
 
 void
@@ -374,6 +431,8 @@ kms_projector_capture_display(struct capture_buffer *buffer)
 
 	old = projector->capture_buffer_new;
 	projector->capture_buffer_new = buffer;
+
+	projector->capture_stopped = false;
 
 	pthread_mutex_unlock(projector->capture_buffer_mutex);
 

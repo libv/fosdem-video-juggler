@@ -83,6 +83,10 @@ struct kms_status {
 	 * a poor mans "No signal".
 	 */
 	uint32_t capture_stall_count;
+
+	/* Flag the stream stopping, protect with capture_buffer_mutex */
+	bool capture_stopped;
+	uint32_t capture_stopped_count;
 };
 static struct kms_status *kms_status;
 
@@ -481,6 +485,7 @@ static void *
 kms_status_thread_handler(void *arg)
 {
 	struct kms_status *status = (struct kms_status *) arg;
+	bool stopped = false;
 	int ret, i;
 
 	for (i = 0; true; i++) {
@@ -490,6 +495,8 @@ kms_status_thread_handler(void *arg)
 
 		new = status->capture_buffer_new;
 		status->capture_buffer_new = NULL;
+
+		stopped = status->capture_stopped;
 
 		pthread_mutex_unlock(status->capture_buffer_mutex);
 
@@ -511,10 +518,33 @@ kms_status_thread_handler(void *arg)
 					       status->capture_stall_count);
 				status->capture_stall_count = 0;
 			}
+			if (status->capture_stopped_count) {
+				if (status->capture_stopped_count > 2)
+					printf("Status: Capture stopped for"
+					       " %d frames.\n",
+					       status->capture_stopped_count);
+				status->capture_stopped_count = 0;
+			}
+		} else if (stopped) {
+			status->capture_stopped_count++;
+
+			if (status->capture_buffer_current) {
+				printf("Status: No input! (stopped)\n");
+
+				ret = kms_status_frame_noinput(status, i);
+				if (ret)
+					return NULL;
+
+				old = status->capture_buffer_current;
+				status->capture_buffer_current = NULL;
+				capture_buffer_display_release(old);
+			}
+
+			usleep(16667);
 		} else {
 			status->capture_stall_count++;
 			if (status->capture_stall_count == 5) {
-				printf("Status: No input!\n");
+				printf("Status: No input! (stalled)\n");
 
 				ret = kms_status_frame_noinput(status, i);
 				if (ret)
@@ -537,6 +567,26 @@ kms_status_thread_handler(void *arg)
 }
 
 void
+kms_status_capture_stop(void)
+{
+	struct kms_status *status = kms_status;
+	struct capture_buffer *new;
+
+	pthread_mutex_lock(status->capture_buffer_mutex);
+
+	new = status->capture_buffer_new;
+	status->capture_buffer_new = NULL;
+
+	status->capture_stopped = true;
+
+	pthread_mutex_unlock(status->capture_buffer_mutex);
+
+	if (new)
+		capture_buffer_display_release(new);
+
+}
+
+void
 kms_status_capture_display(struct capture_buffer *buffer)
 {
 	struct kms_status *status = kms_status;
@@ -550,8 +600,9 @@ kms_status_capture_display(struct capture_buffer *buffer)
 	pthread_mutex_lock(status->capture_buffer_mutex);
 
 	old = status->capture_buffer_new;
-
 	status->capture_buffer_new = buffer;
+
+	status->capture_stopped = false;
 
 	pthread_mutex_unlock(status->capture_buffer_mutex);
 

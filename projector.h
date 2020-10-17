@@ -21,6 +21,7 @@
 struct capture_buffer;
 
 void kms_projector_capture_display(struct capture_buffer *buffer);
+void kms_projector_capture_stop(void);
 
 int kms_projector_init(void);
 

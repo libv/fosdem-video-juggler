@@ -862,6 +862,13 @@ capture_buffer_display(struct capture_buffer *buffer)
 	return 0;
 }
 
+static void
+capture_buffer_display_stop(void)
+{
+	kms_projector_capture_stop();
+	kms_status_capture_stop();
+}
+
 static void *
 capture_thread_handler(void *arg)
 {
@@ -926,6 +933,7 @@ capture_thread_handler(void *arg)
 	}
 
 	printf("Captured %d buffers.\n", i);
+	capture_buffer_display_stop();
 
 	/*
 	 * For now, ignore whether we got an error or if the stream ended,
