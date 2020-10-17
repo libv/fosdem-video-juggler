@@ -335,6 +335,53 @@ v4l2_buffers_wait(void)
 }
 
 static int
+v4l2_buffers_release(void)
+{
+	struct v4l2_requestbuffers request[1] = {{
+			.count = 0,
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+			.memory = V4L2_MEMORY_MMAP,
+		}};
+	int ret, i;
+
+	printf("%s();\n", __func__);
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		struct capture_buffer *buffer = &capture_buffers[i];
+
+		while (1) {
+			pthread_mutex_lock(buffer->reference_count_mutex);
+
+			if (!buffer->reference_count) {
+				printf("%s: tearing down buffer %d\n",
+				       __func__, i);
+				pthread_mutex_destroy(buffer->
+						      reference_count_mutex);
+				break;
+			}
+
+			/* should not happen if we waited before */
+			printf("%s: Buffer %d is still in use.\n",
+			       __func__, i);
+			pthread_mutex_unlock(buffer->reference_count_mutex);
+		}
+	}
+
+	capture_buffer_count = 0;
+	free(capture_buffers);
+	capture_buffers = NULL;
+
+	ret = ioctl(capture_fd, VIDIOC_REQBUFS, request);
+	if (ret) {
+		fprintf(stderr, "%s(): Error: VIDIOC_REQBUFS failed: %s\n",
+			__func__, strerror(errno));
+		return ret;
+	}
+
+	return 0;
+}
+
+static int
 v4l2_buffer_mmap(int index, struct capture_buffer *buffer)
 {
 	struct v4l2_plane planes[3] = {{ 0 }};
@@ -900,6 +947,10 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	ret = v4l2_buffers_fd_close();
+	if (ret)
+		return NULL;
+
+	ret = v4l2_buffers_release();
 	if (ret)
 		return NULL;
 
