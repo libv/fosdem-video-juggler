@@ -451,6 +451,22 @@ v4l2_buffers_kms_import(void)
 }
 
 static int
+v4l2_buffers_kms_release(void)
+{
+	int ret, i;
+
+	printf("%s();\n", __func__);
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		ret = kms_buffer_release(&capture_buffers[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int
 v4l2_buffer_queue(int index)
 {
 	struct v4l2_plane planes[3] = {{ 0 }};
@@ -801,6 +817,10 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	v4l2_buffers_wait();
+
+	ret = v4l2_buffers_kms_release();
+	if (ret)
+		return NULL;
 
 	return NULL;
 }

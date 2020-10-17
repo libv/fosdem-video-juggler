@@ -932,6 +932,26 @@ kms_buffer_import(struct capture_buffer *buffer)
 /*
  *
  */
+int
+kms_buffer_release(struct capture_buffer *buffer)
+{
+	int ret;
+
+	printf("%s(%d, %d);\n", __func__, buffer->index, buffer->kms_fb_id);
+
+	ret = drmModeRmFB(kms_fd, buffer->kms_fb_id);
+	if (ret) {
+		fprintf(stderr, "%s(%d, %d) failed: %s.\n", __func__,
+			buffer->index, buffer->kms_fb_id, strerror(errno));
+		return ret;
+	}
+
+	return 0;
+}
+
+/*
+ *
+ */
 struct kms_buffer *
 kms_png_read(const char *filename)
 {
