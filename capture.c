@@ -476,8 +476,24 @@ v4l2_streaming_start(void)
 	return 0;
 }
 
-static struct capture_buffer *
-v4l2_buffer_dequeue(void)
+static int
+v4l2_streaming_stop(void)
+{
+	int type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+	int ret;
+
+	ret = ioctl(capture_fd, VIDIOC_STREAMOFF, &type);
+	if (ret) {
+		fprintf(stderr, "Error: VIDIOC_STREAMOFF failed: %s\n",
+			strerror(errno));
+		return ret;
+	}
+
+	return 0;
+}
+
+static int
+v4l2_buffer_dequeue(struct capture_buffer **buffer_return)
 {
 	struct v4l2_plane planes[3] = {{ 0 }};
 	struct v4l2_buffer dequeue[1] = {{
@@ -493,7 +509,8 @@ v4l2_buffer_dequeue(void)
 	if (ret) {
 		fprintf(stderr, "Error: ioctl(VIDIOC_DQBUF) failed: %s\n",
 			strerror(errno));
-		return NULL;
+		*buffer_return = NULL;
+		return ret;
 	}
 
 	buffer = &capture_buffers[dequeue->index];
@@ -506,7 +523,8 @@ v4l2_buffer_dequeue(void)
 	else
 		buffer->last = false;
 
-	return buffer;
+	*buffer_return = buffer;
+	return ret;
 }
 
 static void
@@ -722,9 +740,10 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	for (i = 0; true; i++) {
-		struct capture_buffer *buffer = v4l2_buffer_dequeue();
+		struct capture_buffer *buffer = NULL;
 
-		if (!buffer) {
+		ret = v4l2_buffer_dequeue(&buffer);
+		if (ret) {
 			fprintf(stderr, "%s(): stopping thread.\n", __func__);
 			break;
 		}
@@ -741,7 +760,16 @@ capture_thread_handler(void *arg)
 			capture_buffer_display(buffer);
 	}
 
-	printf("\nCaptured %d buffers.\n", i);
+	printf("Captured %d buffers.\n", i);
+
+	/*
+	 * For now, ignore whether we got an error or if the stream ended,
+	 * and try to reinitialize everything.
+	 */
+
+	ret = v4l2_streaming_stop();
+	if (ret)
+		return NULL;
 
 	return NULL;
 }
