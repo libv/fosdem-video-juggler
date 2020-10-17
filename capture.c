@@ -377,12 +377,49 @@ v4l2_buffer_mmap(int index, struct capture_buffer *buffer)
 }
 
 static int
+v4l2_buffer_munmap(int index, struct capture_buffer *buffer)
+{
+	int ret, i;
+
+	for (i = 0; i < 3; i++) {
+		if (!buffer->planes[i].map)
+			continue;
+
+		ret = munmap(buffer->planes[i].map, capture_plane_size);
+		if (ret) {
+			fprintf(stderr, "Error: failed to munmap buffer %d[%d]:"
+				" %s\n", buffer->index, i, strerror(errno));
+			return errno;
+		}
+		buffer->planes[i].map = NULL;
+	}
+
+	return 0;
+}
+
+static int
 v4l2_buffers_mmap(void)
 {
 	int ret, i;
 
 	for (i = 0; i < capture_buffer_count; i++) {
 		ret = v4l2_buffer_mmap(i, &capture_buffers[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int
+v4l2_buffers_munmap(void)
+{
+	int ret, i;
+
+	printf("%s();\n", __func__);
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		ret = v4l2_buffer_munmap(i, &capture_buffers[i]);
 		if (ret)
 			return ret;
 	}
@@ -819,6 +856,10 @@ capture_thread_handler(void *arg)
 	v4l2_buffers_wait();
 
 	ret = v4l2_buffers_kms_release();
+	if (ret)
+		return NULL;
+
+	ret = v4l2_buffers_munmap();
 	if (ret)
 		return NULL;
 
