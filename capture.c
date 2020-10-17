@@ -305,6 +305,35 @@ v4l2_buffers_alloc(int width, int height, int pitch, int plane_size,
 	return 0;
 }
 
+/*
+ * Wait until all buffers are released by the kms display threads.
+ */
+static void
+v4l2_buffers_wait(void)
+{
+	int i;
+
+	printf("%s();\n", __func__);
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		struct capture_buffer *buffer = &capture_buffers[i];
+
+		while (1) {
+			pthread_mutex_lock(buffer->reference_count_mutex);
+
+			if (!buffer->reference_count) {
+				pthread_mutex_unlock(buffer->reference_count_mutex);
+				break;
+			} else {
+				pthread_mutex_unlock(buffer->reference_count_mutex);
+
+				/* don't just spin, we might need to wait 1/60s */
+				usleep(1000);
+			}
+		}
+	}
+}
+
 static int
 v4l2_buffer_mmap(int index, struct capture_buffer *buffer)
 {
@@ -770,6 +799,8 @@ capture_thread_handler(void *arg)
 	ret = v4l2_streaming_stop();
 	if (ret)
 		return NULL;
+
+	v4l2_buffers_wait();
 
 	return NULL;
 }
