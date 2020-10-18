@@ -474,6 +474,42 @@ v4l2_buffers_export(void)
 }
 
 static int
+v4l2_buffer_fd_close(int index, struct capture_buffer *buffer)
+{
+	int i, ret;
+
+	for (i = 0; i < 3; i++) {
+		ret = close(buffer->planes[i].export_fd);
+		if (ret) {
+			fprintf(stderr, "%s: Error: close() on %d.%d failed:"
+				" %s\n", __func__, buffer->index, i,
+				strerror(errno));
+			return ret;
+		}
+
+		buffer->planes[i].export_fd = -1;
+
+		printf("Closed buffer fd %02d[%d].\n", buffer->index, i);
+	}
+
+	return 0;
+}
+
+static int
+v4l2_buffers_fd_close(void)
+{
+	int ret, i;
+
+	for (i = 0; i < capture_buffer_count; i++) {
+		ret = v4l2_buffer_fd_close(i, &capture_buffers[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+static int
 v4l2_buffers_kms_import(void)
 {
 	int ret, i;
@@ -860,6 +896,10 @@ capture_thread_handler(void *arg)
 		return NULL;
 
 	ret = v4l2_buffers_munmap();
+	if (ret)
+		return NULL;
+
+	ret = v4l2_buffers_fd_close();
 	if (ret)
 		return NULL;
 
