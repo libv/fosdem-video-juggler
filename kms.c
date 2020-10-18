@@ -935,7 +935,7 @@ kms_buffer_import(struct capture_buffer *buffer)
 int
 kms_buffer_release(struct capture_buffer *buffer)
 {
-	int ret;
+	int ret, i;
 
 	printf("%s(%d, %d);\n", __func__, buffer->index, buffer->kms_fb_id);
 
@@ -944,6 +944,21 @@ kms_buffer_release(struct capture_buffer *buffer)
 		fprintf(stderr, "%s(%d, %d) failed: %s.\n", __func__,
 			buffer->index, buffer->kms_fb_id, strerror(errno));
 		return ret;
+	}
+
+	for (i = 0; i < 3; i++) {
+		struct drm_gem_close gem_close[1] = {{
+			.handle = buffer->planes[i].prime_handle,
+		}};
+
+		ret = drmIoctl(kms_fd, DRM_IOCTL_GEM_CLOSE, gem_close);
+		if (ret) {
+			fprintf(stderr, "%s: drmIoctl(GEM_CLOSE), %d) "
+				"failed: %s\n", __func__,
+				buffer->planes[i].prime_handle,
+				strerror(errno));
+			return ret;
+		}
 	}
 
 	return 0;
