@@ -53,6 +53,12 @@ static struct demp_buffer {
 		size_t size;
 	} inputs[3];
 	int input_count;
+
+	struct {
+		uint8_t *map;
+		size_t size;
+	} outputs[3];
+	int output_count;
 } demp_buffer[1];
 
 static int
@@ -347,6 +353,88 @@ demp_input_create(void)
 	return 0;
 }
 
+static int
+demp_output_create(void)
+{
+	struct v4l2_format format[1] = {{
+		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+	}};
+	struct v4l2_requestbuffers request[1] = {{
+		.count = 1,
+		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+		.memory = V4L2_MEMORY_MMAP,
+	}};
+	struct v4l2_plane planes_query[3] = {{ 0 }};
+	struct v4l2_buffer query[1] = {{
+		.index = 0, /* we only have 1 buffer, so index is 0 */
+		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+		.memory = V4L2_MEMORY_MMAP,
+		.length = 3,
+		.m.planes = planes_query,
+	}};
+	int i, ret;
+
+	ret = ioctl(demp_fd, VIDIOC_G_FMT, format);
+	if (ret) {
+		fprintf(stderr, "Error: %s():ioctl(G_FMT(format)): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+
+	format->fmt.pix_mp.pixelformat = V4L2_PIX_FMT_NV12;
+
+	ret = ioctl(demp_fd, VIDIOC_S_FMT, format);
+	if (ret) {
+		fprintf(stderr, "Error: %s():ioctl(S_FMT(input)): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+
+	printf("Output format:\n");
+	demp_format_print(&format->fmt.pix_mp);
+
+	ret = ioctl(demp_fd, VIDIOC_REQBUFS, request);
+	if (ret) {
+		fprintf(stderr, "Error: %s():ioctl(REQBUFS): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+
+	if (request->count < 1) {
+		fprintf(stderr, "Error: %s(): Not enough buffers available.\n",
+			__func__);
+		return -ENOMEM;
+	}
+
+	ret = ioctl(demp_fd, VIDIOC_QUERYBUF, query);
+	if (ret) {
+		fprintf(stderr, "Error: %s():ioctl(QUERYBUF): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+
+	for (i = 0; i < format->fmt.pix_mp.num_planes; i++) {
+		off_t offset = query->m.planes[i].m.mem_offset;
+		size_t size = query->m.planes[i].length;
+		void *map;
+
+		printf("%s: plane %d: 0x%08lX (%dbytes)\n",
+		       __func__, i, offset, (int) size);
+
+		map = mmap(NULL, size, PROT_READ, MAP_SHARED, demp_fd, offset);
+		if (map == MAP_FAILED) {
+			fprintf(stderr, "Error: %s():mmap(%d): %s\n",
+				__func__, 0, strerror(errno));
+			return errno;
+		}
+		demp_buffer->outputs[i].map = map;
+		demp_buffer->outputs[i].size = size;
+	}
+	demp_buffer->output_count = i;
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
@@ -370,6 +458,13 @@ int main(int argc, char *argv[])
 	ret = demp_input_create();
 	if (ret) {
 		fprintf(stderr, "Error: demp_input_create(): %s\n",
+			strerror(ret));
+		return ret;
+	}
+
+	ret = demp_output_create();
+	if (ret) {
+		fprintf(stderr, "Error: demp_output_create(): %s\n",
 			strerror(ret));
 		return ret;
 	}
