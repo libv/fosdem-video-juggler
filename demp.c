@@ -38,6 +38,12 @@
 #define V4L2_PIX_FMT_R8_G8_B8 v4l2_fourcc('P', 'R', 'G', 'B') /* 24bit planar RGB */
 #endif
 
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#include <drm_fourcc.h>
+
+#include "kms.h"
+
 #define DRIVER_NAME "sun4i_demp"
 
 static int demp_fd;
@@ -547,6 +553,38 @@ demp_buffers_dequeue(void)
 	return 0;
 }
 
+static int
+demp_kms_show(void)
+{
+	bool connected, mode_ok;
+	uint32_t connector_id, encoder_id, crtc_id;
+	int crtc_width, crtc_height;
+	int ret;
+
+	ret = kms_init();
+	if (ret)
+		return ret;
+
+	ret = kms_connector_id_get(DRM_MODE_CONNECTOR_HDMIA, &connector_id);
+	if (ret)
+		return ret;
+
+	ret = kms_connection_check(connector_id, &connected, &encoder_id);
+	if (ret)
+		return ret;
+
+	ret = kms_crtc_id_get(encoder_id, &crtc_id,
+			      &mode_ok, &crtc_width, &crtc_height);
+	if (ret)
+		return ret;
+
+	printf("Using CRTC %X (%dx%d), connector %X (%s).\n",
+	       crtc_id, crtc_width, crtc_height, connector_id,
+	       kms_connector_string(DRM_MODE_CONNECTOR_HDMIA));
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
@@ -593,6 +631,13 @@ int main(int argc, char *argv[])
 	ret = demp_buffers_dequeue();
 	if (ret) {
 		fprintf(stderr, "Error: demp_buffers_dequeue(): %s\n",
+			strerror(ret));
+		return ret;
+	}
+
+	ret = demp_kms_show();
+	if (ret) {
+		fprintf(stderr, "Error: demp_kms_show(): %s\n",
 			strerror(ret));
 		return ret;
 	}
