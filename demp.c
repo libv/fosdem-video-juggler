@@ -453,6 +453,62 @@ demp_input_load(void)
 	}
 }
 
+static int
+demp_streaming_start(void)
+{
+	struct v4l2_plane planes_input[3] = {{ 0 }};
+	struct v4l2_buffer queue_input[1] = {{
+		.index = 0, /* we only have 1 buffer, so index is 0 */
+		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+		.memory = V4L2_MEMORY_MMAP,
+		.m.planes = planes_input,
+		.length = 3,
+	}};
+	struct v4l2_plane planes_output[3] = {{ 0 }};
+	struct v4l2_buffer queue_output[1] = {{
+		.index = 0, /* we only have 1 buffer, so index is 0 */
+		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+		.memory = V4L2_MEMORY_MMAP,
+		.m.planes = planes_output,
+		.length = 3,
+	}};
+	int type_input = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE;
+	int type_output = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
+	int ret;
+
+	ret = ioctl(demp_fd, VIDIOC_QBUF, queue_input);
+	if (ret) {
+		fprintf(stderr, "Error: %s()ioctl(QBUF(input)): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+
+	ret = ioctl(demp_fd, VIDIOC_STREAMON, &type_input);
+	if (ret) {
+		fprintf(stderr, "Error: %s(): ioctl(STREAMON(input)): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+	printf("Input stream started!\n");
+
+	ret = ioctl(demp_fd, VIDIOC_QBUF, queue_output);
+	if (ret) {
+		fprintf(stderr, "Error: %s()ioctl(QBUF(output)): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+
+	ret = ioctl(demp_fd, VIDIOC_STREAMON, &type_output);
+	if (ret) {
+		fprintf(stderr, "Error: %s(): ioctl(STREAMON(output)): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+	printf("Output stream started!\n");
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
@@ -488,6 +544,14 @@ int main(int argc, char *argv[])
 	}
 
 	demp_input_load();
+
+	ret = demp_streaming_start();
+	if (ret) {
+		fprintf(stderr, "Error: demp_streaming_start(): %s\n",
+			strerror(ret));
+		return ret;
+	}
+
 
 	return 0;
 }
