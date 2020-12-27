@@ -64,6 +64,7 @@ static struct demp_buffer {
 		uint8_t *map;
 		size_t size;
 		int export_fd;
+		uint32_t prime_handle;
 	} outputs[3];
 	int output_count;
 } demp_buffer[1];
@@ -641,11 +642,57 @@ demp_v4l2_buffers_export(void)
 }
 
 static int
+demp_kms_buffer_import(uint32_t *fb_id)
+{
+	uint32_t handles[4] = { 0 };
+	uint32_t pitches[4] = { 0 };
+	uint32_t offsets[4] = { 0 };
+	int ret, i;
+
+	for (i = 0; i < demp_buffer->output_count; i++) {
+		struct drm_prime_handle prime[1] = {{
+				.fd = demp_buffer->outputs[i].export_fd,
+			}};
+
+		ret = drmIoctl(kms_fd, DRM_IOCTL_PRIME_FD_TO_HANDLE, prime);
+		if (ret) {
+			fprintf(stderr, "%s: drmIoctl(PRIME_FD_TO_HANDLE, %d) "
+				"failed: %s\n", __func__,
+				demp_buffer->outputs[i].export_fd,
+				strerror(errno));
+			return ret;
+		}
+
+		demp_buffer->outputs[i].prime_handle = prime->handle;
+		handles[i] = prime->handle;
+		pitches[i] = demp_buffer->width;
+	}
+
+	printf("%s(): prime handles: %02X, %02X, %02X\n",
+	       __func__, demp_buffer->outputs[0].prime_handle,
+	       demp_buffer->outputs[1].prime_handle,
+	       demp_buffer->outputs[2].prime_handle);
+
+	ret = drmModeAddFB2(kms_fd, demp_buffer->width, demp_buffer->height,
+			    DRM_FORMAT_NV12, handles, pitches, offsets,
+			    fb_id, 0);
+	if (ret) {
+		fprintf(stderr, "%s(): failed to create fb: %s\n",
+			__func__, strerror(errno));
+		return -errno;
+	}
+
+	printf("%s(): FB %02u.\n", __func__, *fb_id);
+
+	return 0;
+}
+
+static int
 demp_kms_show(void)
 {
 	struct kms_plane *plane;
 	bool connected, mode_ok;
-	uint32_t connector_id, encoder_id, crtc_id;
+	uint32_t connector_id, encoder_id, crtc_id, fb_id;
 	int crtc_width, crtc_height, crtc_index;
 	int ret;
 
@@ -681,6 +728,10 @@ demp_kms_show(void)
 		return -1;
 
 	ret = demp_v4l2_buffers_export();
+	if (ret)
+		return ret;
+
+	ret = demp_kms_buffer_import(&fb_id);
 	if (ret)
 		return ret;
 
