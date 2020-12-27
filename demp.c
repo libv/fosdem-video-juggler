@@ -21,6 +21,11 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <stdbool.h>
+#include <inttypes.h>
+#include <stdlib.h>
+#include <sysexits.h>
+
+#include <png.h>
 
 #include <linux/videodev2.h>
 
@@ -35,6 +40,13 @@
 #define DRIVER_NAME "sun4i_demp"
 
 static int demp_fd;
+
+static struct demp_buffer {
+	int width;
+	int height;
+
+	uint32_t *png_rgba;
+} demp_buffer[1];
 
 static int
 demp_device_open_and_verify(int number)
@@ -178,11 +190,72 @@ demp_device_find(void)
 	return -ENODEV;
 }
 
+static int
+demp_png_load(const char *filename)
+{
+	png_image image[1] = {{
+		.version = PNG_IMAGE_VERSION,
+	}};
+	int ret;
+
+	ret = png_image_begin_read_from_file(image, filename);
+	if (ret != 1) {
+		fprintf(stderr, "Error: %s():begin_read(): %s\n",
+			__func__, image->message);
+		return ret;
+	}
+
+	image->format = PNG_FORMAT_RGBA;
+
+	printf("Reading from %s: %dx%d (%dbytes)\n", filename,
+	       image->width, image->height, PNG_IMAGE_SIZE(*image));
+
+	demp_buffer->width = image->width;
+	demp_buffer->height = image->height;
+
+	demp_buffer->png_rgba = calloc(demp_buffer->width * demp_buffer->height,
+				      sizeof(uint32_t));
+	if (!demp_buffer->png_rgba) {
+		fprintf(stderr, "Error: %s(): calloc(): %s\n",
+			__func__, strerror(errno));
+		png_image_free(image);
+		return errno;
+	}
+
+	ret = png_image_finish_read(image, NULL, demp_buffer->png_rgba,
+				    0, NULL);
+	if (ret != 1) {
+		fprintf(stderr, "Error: %s():finish_read(): %s\n",
+			__func__, image->message);
+		free(demp_buffer->png_rgba);
+		png_image_free(image);
+		return ret;
+	}
+
+	png_image_free(image);
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
+	int ret;
+
+	if (argc < 2) {
+		fprintf(stderr, "Error: missing .png argument.\n");
+		return EX_USAGE;
+	}
+
 	demp_fd = demp_device_find();
 	if (demp_fd < 0)
 		return -demp_fd;
+
+	ret = demp_png_load(argv[1]);
+	if (ret) {
+		fprintf(stderr, "Error: demp_png_load(): %s\n",
+			strerror(ret));
+		return ret;
+	}
 
 	return 0;
 }
