@@ -553,12 +553,71 @@ demp_buffers_dequeue(void)
 	return 0;
 }
 
+static struct kms_plane *
+demp_kms_plane_get(int crtc_index)
+{
+	drmModePlaneRes *resources_plane = NULL;
+	struct kms_plane *kms_plane = NULL;
+	int i;
+
+	/* Get plane resources so we can start sifting through the planes */
+	resources_plane = drmModeGetPlaneResources(kms_fd);
+	if (!resources_plane) {
+		fprintf(stderr, "%s: Failed to get KMS plane resources\n",
+			__func__);
+		goto error;
+	}
+
+	/* now cycle through the planes to find one for our crtc */
+	for (i = 0; i < (int) resources_plane->count_planes; i++) {
+		drmModePlane *plane;
+		uint32_t plane_id = resources_plane->planes[i];
+		int j;
+
+		plane = drmModeGetPlane(kms_fd, plane_id);
+		if (!plane) {
+			fprintf(stderr, "%s: failed to get Plane %u: %s\n",
+				__func__, plane_id, strerror(errno));
+			goto error;
+		}
+
+		if (!(plane->possible_crtcs & (1 << crtc_index)))
+			goto plane_next;
+
+		for (j = 0; j < (int) plane->count_formats; j++)
+			if (plane->formats[j] == DRM_FORMAT_NV12)
+				break;
+
+		if (j == (int) plane->count_formats)
+			goto plane_next;
+
+		printf("NV12 Plane: ");
+		kms_plane = kms_plane_create(plane->plane_id);
+		if (!kms_plane)
+			goto plane_error;
+
+		break;
+
+	plane_next:
+		drmModeFreePlane(plane);
+		continue;
+	plane_error:
+		drmModeFreePlane(plane);
+		break;
+	}
+
+ error:
+	drmModeFreePlaneResources(resources_plane);
+	return kms_plane;
+}
+
 static int
 demp_kms_show(void)
 {
+	struct kms_plane *plane;
 	bool connected, mode_ok;
 	uint32_t connector_id, encoder_id, crtc_id;
-	int crtc_width, crtc_height;
+	int crtc_width, crtc_height, crtc_index;
 	int ret;
 
 	ret = kms_init();
@@ -581,6 +640,16 @@ demp_kms_show(void)
 	printf("Using CRTC %X (%dx%d), connector %X (%s).\n",
 	       crtc_id, crtc_width, crtc_height, connector_id,
 	       kms_connector_string(DRM_MODE_CONNECTOR_HDMIA));
+
+	ret = kms_crtc_index_get(crtc_id);
+	if (ret < 0)
+		return ret;
+
+	crtc_index = ret;
+
+	plane = demp_kms_plane_get(crtc_index);
+	if (!plane)
+		return -1;
 
 	return 0;
 }
