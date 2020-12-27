@@ -63,6 +63,7 @@ static struct demp_buffer {
 	struct {
 		uint8_t *map;
 		size_t size;
+		int export_fd;
 	} outputs[3];
 	int output_count;
 } demp_buffer[1];
@@ -612,6 +613,34 @@ demp_kms_plane_get(int crtc_index)
 }
 
 static int
+demp_v4l2_buffers_export(void)
+{
+	struct v4l2_exportbuffer export[1] = {{
+		.index = 0, /* single buffer anyway */
+		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+		.flags = O_RDONLY,
+	}};
+	int i, ret;
+
+	for (i = 0; i < demp_buffer->output_count; i++) {
+		export->plane = i;
+
+		ret = ioctl(demp_fd, VIDIOC_EXPBUF, export);
+		if (ret) {
+			fprintf(stderr, "Error: %s: ioctl(EXPBUF(%d)): %s\n",
+				__func__, i, strerror(errno));
+			return ret;
+		}
+
+		demp_buffer->outputs[i].export_fd = export->fd;
+
+		printf("Exported output buffer %d to %d.\n", i, export->fd);
+	}
+
+	return 0;
+}
+
+static int
 demp_kms_show(void)
 {
 	struct kms_plane *plane;
@@ -650,6 +679,10 @@ demp_kms_show(void)
 	plane = demp_kms_plane_get(crtc_index);
 	if (!plane)
 		return -1;
+
+	ret = demp_v4l2_buffers_export();
+	if (ret)
+		return ret;
 
 	return 0;
 }
