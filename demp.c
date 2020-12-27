@@ -509,6 +509,44 @@ demp_streaming_start(void)
 	return 0;
 }
 
+static int
+demp_buffers_dequeue(void)
+{
+	struct v4l2_plane planes_input[3] = {{ 0 }};
+	struct v4l2_buffer dequeue_input[1] = {{
+		.type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE,
+		.memory = V4L2_MEMORY_MMAP,
+		.m.planes = planes_input,
+		.length = 3,
+	}};
+	struct v4l2_plane planes_output[3] = {{ 0 }};
+	struct v4l2_buffer dequeue_output[1] = {{
+		.type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE,
+		.memory = V4L2_MEMORY_MMAP,
+		.m.planes = planes_output,
+		.length = 3,
+	}};
+	int ret;
+
+	ret = ioctl(demp_fd, VIDIOC_DQBUF, dequeue_input);
+	if (ret) {
+		fprintf(stderr, "Error: %s():ioctl(DQBUF(input): %s\n",
+			__func__, strerror(errno));
+		return ret;
+	}
+	printf("Input buffer %d dequeued.\n", dequeue_input->index);
+
+	ret = ioctl(demp_fd, VIDIOC_DQBUF, dequeue_output);
+	if (ret) {
+		fprintf(stderr, "Error: %s():ioctl(DQBUF(output): %s\n",
+			__func__, strerror(errno));
+		return ret;
+	}
+	printf("Output buffer %d dequeued.\n", dequeue_output->index);
+
+	return 0;
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
@@ -552,6 +590,12 @@ int main(int argc, char *argv[])
 		return ret;
 	}
 
+	ret = demp_buffers_dequeue();
+	if (ret) {
+		fprintf(stderr, "Error: demp_buffers_dequeue(): %s\n",
+			strerror(ret));
+		return ret;
+	}
 
 	return 0;
 }
