@@ -688,6 +688,61 @@ demp_kms_buffer_import(uint32_t *fb_id)
 }
 
 static int
+demp_kms_fb_show(uint32_t crtc_id, struct kms_plane *plane, uint32_t fb_id)
+{
+	drmModeAtomicReqPtr request;
+	int ret;
+
+	request = drmModeAtomicAlloc();
+
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_id, crtc_id);
+
+	/* Full crtc size */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_x, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_y, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_w,
+				 demp_buffer->width);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_crtc_h,
+				 demp_buffer->height);
+
+	/* read in full size image */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_x, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_y, 0);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_w,
+				 demp_buffer->width << 16);
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_src_h,
+				 demp_buffer->height << 16);
+
+	plane->active = true;
+
+	/* actual flip. */
+	drmModeAtomicAddProperty(request, plane->plane_id,
+				 plane->property_fb_id, fb_id);
+
+	ret = drmModeAtomicCommit(kms_fd, request,
+				  DRM_MODE_ATOMIC_ALLOW_MODESET, NULL);
+
+	drmModeAtomicFree(request);
+
+	if (ret) {
+		fprintf(stderr, "Error: %s(): drmModeAtomicCommit(): %s\n",
+			__func__, strerror(errno));
+		return errno;
+	}
+
+	return 0;
+}
+
+static int
 demp_kms_show(void)
 {
 	struct kms_plane *plane;
@@ -734,6 +789,14 @@ demp_kms_show(void)
 	ret = demp_kms_buffer_import(&fb_id);
 	if (ret)
 		return ret;
+
+	ret = demp_kms_fb_show(crtc_id, plane, fb_id);
+	if (ret)
+		return ret;
+
+	printf("Displaying converted NV12 buffer.\n");
+
+	sleep(600);
 
 	return 0;
 }
