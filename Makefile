@@ -8,7 +8,7 @@ LDFLAGS += $(shell pkg-config --libs libdrm)
 CFLAGS += $(shell pkg-config --cflags libpng)
 LDFLAGS += $(shell pkg-config --libs libpng)
 
-all: juggler test_output
+all: juggler test_output demp_test
 
 juggler_objects = \
 	kms.o \
@@ -27,9 +27,17 @@ test_output_objects = \
 test_output: $(test_output_objects)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
 
+demp_test_objects = \
+	kms.o \
+	demp.o
+
+demp_test: $(demp_test_objects)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^
+
 clean:
 	rm -f juggler
 	rm -f test_output
+	rm -f demp_test
 	rm -f *.o
 	rm -f *.P
 
@@ -42,3 +50,4 @@ clean:
 
 -include $(juggler_objects:%.o=%.P)
 -include $(test_output_objects:%.o=%.P)
+-include $(demp_test_objects:%.o=%.P)
