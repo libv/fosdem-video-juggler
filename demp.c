@@ -435,6 +435,24 @@ demp_output_create(void)
 	return 0;
 }
 
+static void
+demp_input_load(void)
+{
+	struct rgba {
+		uint8_t red;
+		uint8_t green;
+		uint8_t blue;
+		uint8_t alpha;
+	} *pixels = (struct rgba *) demp_buffer->png_rgba;
+	int i;
+
+	for (i = 0; i < demp_buffer->inputs[0].size; i++) {
+		demp_buffer->inputs[0].map[i] = pixels[i].red;
+		demp_buffer->inputs[1].map[i] = pixels[i].green;
+		demp_buffer->inputs[2].map[i] = pixels[i].blue;
+	}
+}
+
 int main(int argc, char *argv[])
 {
 	int ret;
@@ -468,6 +486,8 @@ int main(int argc, char *argv[])
 			strerror(ret));
 		return ret;
 	}
+
+	demp_input_load();
 
 	return 0;
 }
